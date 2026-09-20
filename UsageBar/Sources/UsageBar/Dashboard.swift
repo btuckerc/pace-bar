@@ -45,14 +45,9 @@ struct Dashboard: View {
 
     private var codexSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 6) {
-                Text("Codex").font(.system(size: 13, weight: .semibold))
-                self.status("Codex")
-                Spacer()
-                self.forecast
-            }
+            self.heading("Codex", provider: "Codex", detail: nil)
             ForEach(self.store.codex) { account in
-                let stale = account.error != nil || account.updated.map {
+                let stale = self.store.errors["Codex"] != nil || account.error != nil || account.updated.map {
                     Date().timeIntervalSince($0) > (self.store.constrained ? 1800 : 600)
                 } ?? false
                 HStack(alignment: .top, spacing: 12) {
@@ -66,11 +61,12 @@ struct Dashboard: View {
                     .frame(width: 70, alignment: .leading)
                     .help(self.accountHelp(account))
                     if let snapshot = account.snapshot {
-                        HStack(spacing: 12) {
+                        VStack(spacing: 10) {
                             ForEach(snapshot.windows) { window in
+                                let estimate = self.exhaustion(account: account, window: window, stale: stale)
                                 VStack(spacing: 5) {
                                     HStack(spacing: 4) {
-                                        Text(window.compactLabel).lineLimit(1)
+                                        Text(estimate.title).lineLimit(1)
                                             .foregroundStyle(.secondary)
                                         Spacer(minLength: 0)
                                         Text("\(window.remainingPercent, specifier: "%.0f")%").fixedSize()
@@ -81,7 +77,7 @@ struct Dashboard: View {
                                 }
                                 .help(
                                     "\(window.label): \(window.remainingPercent.formatted())% remaining. "
-                                        + "Resets \(window.resetsAt.formatted()).")
+                                        + "Resets \(window.resetsAt.formatted()).\n" + estimate.detail)
                                 .accessibilityElement(children: .combine)
                             }
                         }
@@ -97,22 +93,39 @@ struct Dashboard: View {
         }
     }
 
-    private var forecast: some View {
-        let summary = self.store.quotaForecast.summarize(
-            self.store.codex, now: Date(), freshness: self.store.constrained ? 1800 : 600)
-        let title: String = if self.store.errors["Codex"] != nil {
-            "Refresh needed"
+    private func exhaustion(
+        account: CodexReading,
+        window: QuotaWindow,
+        stale: Bool) -> (title: String, detail: String)
+    {
+        let projection = self.store.quotaForecast.project(account: account.id, window: window, now: Date())
+        let value: String
+        let detail: String
+        if stale {
+            value = "—"
+            detail = "Fresh account data is needed for an estimate."
+        } else if window.resetsAt <= Date() {
+            value = "Resetting"
+            detail = "Awaiting the updated quota after its reset."
+        } else if window.remainingPercent == 0 {
+            value = "Capped"
+            detail = "This allowance is exhausted."
+        } else if let date = projection.exhaustion {
+            value = "≈ " + self.forecastDate(date)
+            detail = "Estimated exhaustion: \(date.formatted()). \(projection.method). Assumes this lane's pace continues."
+        } else if projection.method == "No consumption observed" {
+            value = "Unused"
+            detail = "No observed consumption from which to estimate exhaustion."
+        } else if projection.method == "Too early in this window" {
+            value = "Learning"
+            detail = "Not enough elapsed time or recent observations to estimate exhaustion."
         } else {
-            switch summary.outcome {
-            case let .exhausted(date):
-                date.timeIntervalSinceNow < 60 ? "All capped now" : "All capped ≈ " + self.forecastDate(date)
-            case let .resetFirst(date): "Reset first · " + self.forecastDate(date)
-            case let .nextReset(date): "Next reset · " + self.forecastDate(date)
-            case .insufficient: self.store.codex.isEmpty ? "Checking…" : "Refresh needed"
-            }
+            value = "To reset"
+            detail = "At the observed pace this allowance lasts until its reset. \(projection.method)."
         }
-        return Text(title).font(.system(size: 11)).foregroundStyle(.secondary)
-            .lineLimit(1).help(summary.details)
+        let prefix = window.lane.map { $0 == "gpt-reserve" ? "Reserve" : $0 }
+            ?? (window.periodSeconds == 604_800 ? nil : window.compactLabel)
+        return (prefix.map { "\($0) · \(value)" } ?? value, detail)
     }
 
     private func forecastDate(_ date: Date) -> String {
