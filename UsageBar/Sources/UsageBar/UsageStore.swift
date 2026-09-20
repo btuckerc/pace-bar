@@ -18,6 +18,7 @@ final class UsageStore {
     var paused = false
     var settingsError: String?
 
+    @ObservationIgnored var iconNeedsUpdate: (() -> Void)?
     @ObservationIgnored private let services = Services()
     @ObservationIgnored private let quotaHistory = QuotaHistoryStore()
     @ObservationIgnored private var timer: Timer?
@@ -33,6 +34,14 @@ final class UsageStore {
         ProcessInfo.processInfo.isLowPowerModeEnabled
             || ProcessInfo.processInfo.thermalState == .serious
             || ProcessInfo.processInfo.thermalState == .critical
+    }
+
+    var quotaIconState: QuotaIconState {
+        QuotaIconState(
+            readings: self.codex,
+            now: Date(),
+            freshness: self.constrained ? 1800 : 600,
+            unavailable: self.paused || self.sleeping || self.settingsError != nil || self.errors["Codex"] != nil)
     }
 
     func start() {
@@ -63,6 +72,7 @@ final class UsageStore {
         }
         self.tasks.removeAll()
         self.refreshing.removeAll()
+        self.iconNeedsUpdate?()
     }
 
     func reloadConfiguration() {
@@ -75,6 +85,8 @@ final class UsageStore {
     }
 
     func refresh(force: Bool = false) {
+        // Reuse the existing wake-up to expire stale readings, including while paused.
+        defer { self.iconNeedsUpdate?() }
         guard !self.paused, !self.sleeping, self.settingsError == nil else { return }
         let cloudInterval: TimeInterval = self.constrained ? 900 : 300
         let nousInterval: TimeInterval = self.constrained ? 300 : 60
@@ -101,6 +113,7 @@ final class UsageStore {
                 if generation == self.generation {
                     self.tasks.removeValue(forKey: provider)
                     self.refreshing.remove(provider)
+                    if provider == "Codex" { self.iconNeedsUpdate?() }
                 }
             }
             do {

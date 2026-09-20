@@ -25,13 +25,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     private let popover = NSPopover()
     private var settingsWindow: NSWindow?
     private var observers: [NSObjectProtocol] = []
+    private var lastIconState: QuotaIconState?
 
     func applicationDidFinishLaunching(_: Notification) {
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         self.item = item
-        item.button?.image = UsageIcon.image()
-        item.button?.image?.isTemplate = true
-        item.button?.toolTip = "Usage Bar — Codex, OpenRouter, nous"
+        self.store.iconNeedsUpdate = { [weak self] in self?.updateIcon() }
+        self.updateIcon()
         item.button?.target = self
         item.button?.action = #selector(self.togglePopover)
         self.popover.behavior = .transient
@@ -50,6 +50,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             Task { @MainActor in self?.store.wake() }
         }
         self.observers = [sleepObserver, wakeObserver]
+    }
+
+    private func updateIcon() {
+        let state = self.store.quotaIconState
+        guard let button = self.item?.button else { return }
+        if state != self.lastIconState {
+            self.lastIconState = state
+            button.image = UsageIcon.image(levels: state.levels)
+        }
+        let values = zip(QuotaIconState.labels, state.levels).map { label, level in
+            let remaining = self.store.codex.first { $0.label == label }?.snapshot?.windows
+                .filter { $0.lane == nil }.map(\.remainingPercent).min()
+            let value: String = if level != nil, let remaining {
+                remaining == 0 ? "exhausted"
+                    : remaining < 0.1 ? "<0.1% left"
+                    : "\(remaining.formatted(.number.precision(.fractionLength(0...1))))% left"
+            } else {
+                "unavailable"
+            }
+            return "\(label): \(value)"
+        }
+        let description = "Usage Bar — Codex remaining\n" + values.joined(separator: "\n")
+        // Keep spoken/hover values accurate even when a change is too small to move a pixel.
+        if button.toolTip != description {
+            button.image?.accessibilityDescription = description
+            button.setAccessibilityLabel(description)
+            button.toolTip = description
+        }
     }
 
     @objc private func togglePopover() {

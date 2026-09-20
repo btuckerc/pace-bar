@@ -1,35 +1,38 @@
 import AppKit
 
-/// A split aperture: four offset strokes around a shared center.
-/// Drawn once as a template, with no status-driven redraws or animation.
+/// Four open reservoirs. Template tinting follows the menu bar's appearance.
+/// Values are quantized by QuotaIconState; no animation or independent refresh work.
 @MainActor
 enum UsageIcon {
-    static func image() -> NSImage {
+    static func image(levels: [Int?] = [nil, nil, nil, nil]) -> NSImage {
         let image = NSImage(size: NSSize(width: 18, height: 18), flipped: false) { _ in
-            NSColor.labelColor.setStroke()
             for index in 0..<4 {
-                let transform = AffineTransform(
-                    translationByX: 9, byY: 9)
-                var rotation = AffineTransform(rotationByDegrees: CGFloat(index) * 90)
-                rotation.append(transform)
-                let path = NSBezierPath()
-                path.move(to: NSPoint(x: -5.5, y: 0.5))
-                path.line(to: NSPoint(x: -5.5, y: 3.5))
-                path.curve(
-                    to: NSPoint(x: -3.5, y: 5.5),
-                    controlPoint1: NSPoint(x: -5.5, y: 4.6),
-                    controlPoint2: NSPoint(x: -4.6, y: 5.5))
-                path.line(to: NSPoint(x: 1.5, y: 5.5))
-                path.transform(using: rotation)
-                path.lineWidth = 1.7
-                path.lineCapStyle = .round
-                path.lineJoinStyle = .round
-                path.stroke()
+                let x = CGFloat(2 + index * 4)
+                guard index < levels.count, let level = levels[index] else {
+                    // Broken tracks indicate unavailable data, never an invented balance.
+                    NSColor.black.withAlphaComponent(0.6).setFill()
+                    for y in [3.0, 8.5, 14.0] {
+                        Self.capsule(x: x, y: y, width: 2, height: 1)
+                    }
+                    continue
+                }
+                NSColor.black.withAlphaComponent(0.18).setFill()
+                Self.capsule(x: x, y: 2.5, width: 2, height: 13)
+                NSColor.black.setFill()
+                // An exhausted account retains a thin baseline; every positive value is taller.
+                Self.capsule(x: x, y: 2.5, width: 2, height: 1 + CGFloat(min(12, max(0, level))))
             }
             return true
         }
         image.isTemplate = true
         image.accessibilityDescription = "Usage Bar"
         return image
+    }
+
+    private static func capsule(x: CGFloat, y: CGFloat, width: CGFloat, height: CGFloat) {
+        NSBezierPath(
+            roundedRect: NSRect(x: x, y: y, width: width, height: height),
+            xRadius: min(width, height) / 2,
+            yRadius: min(width, height) / 2).fill()
     }
 }
