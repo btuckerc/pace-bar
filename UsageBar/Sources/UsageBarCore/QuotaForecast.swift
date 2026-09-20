@@ -36,6 +36,9 @@ public struct QuotaForecast: Sendable {
     public func project(account: String, window: QuotaWindow, now: Date) -> QuotaProjection {
         guard window.resetsAt > now else { return QuotaProjection(exhaustion: nil, method: "Awaiting reset refresh") }
         if window.remainingPercent == 0 { return QuotaProjection(exhaustion: now, method: "Already capped") }
+        if window.usedPercent == 0 {
+            return QuotaProjection(exhaustion: nil, method: "No consumption observed")
+        }
         let points = self.history[self.key(account: account, window: window)] ?? []
         var rate: Double?
         var method = "Current-window average"
@@ -50,7 +53,7 @@ public struct QuotaForecast: Sendable {
         }
         if rate == nil {
             let elapsed = window.periodSeconds - window.resetsAt.timeIntervalSince(now)
-            guard elapsed >= max(900, window.periodSeconds * 0.03), elapsed <= window.periodSeconds else {
+            guard elapsed >= 900, elapsed <= window.periodSeconds else {
                 return QuotaProjection(exhaustion: nil, method: "Too early in this window")
             }
             rate = min(100, window.usedPercent) / elapsed
@@ -61,7 +64,7 @@ public struct QuotaForecast: Sendable {
     }
 
     public struct Summary: Sendable {
-        public enum Outcome: Sendable { case exhausted(Date), resetFirst(Date), insufficient }
+        public enum Outcome: Sendable { case exhausted(Date), resetFirst(Date), nextReset(Date), insufficient }
         public let outcome: Outcome
         public let details: String
     }
@@ -93,13 +96,22 @@ public struct QuotaForecast: Sendable {
                     insufficient = insufficient || projection.method == "Too early in this window"
                         || projection.method == "Awaiting reset refresh"
                 }
-                let estimate = projection.exhaustion.map { $0.formatted(date: .abbreviated, time: .shortened) }
-                    ?? "No cap projected before its reset"
+                let estimate: String = if let exhaustion = projection.exhaustion {
+                    exhaustion.formatted(date: .abbreviated, time: .shortened)
+                } else if projection.method == "Too early in this window" || projection
+                    .method == "Awaiting reset refresh"
+                {
+                    "Not enough timing data"
+                } else {
+                    "No cap projected before its reset"
+                }
                 lines.append("\(account.label) · \(window.compactLabel): \(estimate) (\(projection.method))")
             }
         }
-        let outcome: Summary.Outcome = if earliestReset <= now || insufficient {
+        let outcome: Summary.Outcome = if earliestReset <= now {
             .insufficient
+        } else if insufficient {
+            .nextReset(earliestReset)
         } else if allExhaust, latestExhaustion < earliestReset {
             .exhausted(latestExhaustion)
         } else {

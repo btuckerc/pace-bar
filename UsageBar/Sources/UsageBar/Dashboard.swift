@@ -101,13 +101,14 @@ struct Dashboard: View {
         let summary = self.store.quotaForecast.summarize(
             self.store.codex, now: Date(), freshness: self.store.constrained ? 1800 : 600)
         let title: String = if self.store.errors["Codex"] != nil {
-            "Forecast —"
+            "Refresh needed"
         } else {
             switch summary.outcome {
             case let .exhausted(date):
                 date.timeIntervalSinceNow < 60 ? "All capped now" : "All capped ≈ " + self.forecastDate(date)
             case let .resetFirst(date): "Reset first · " + self.forecastDate(date)
-            case .insufficient: "Forecast —"
+            case let .nextReset(date): "Next reset · " + self.forecastDate(date)
+            case .insufficient: self.store.codex.isEmpty ? "Checking…" : "Refresh needed"
             }
         }
         return Text(title).font(.system(size: 11)).foregroundStyle(.secondary)

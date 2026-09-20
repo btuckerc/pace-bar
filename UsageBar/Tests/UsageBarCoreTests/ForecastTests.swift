@@ -82,7 +82,34 @@ private func account(_ id: String, _ windows: [QuotaWindow]) -> CodexReading {
     guard case .insufficient = QuotaForecast().summarize([stale], now: forecastNow).outcome else {
         Issue.record("Stale data must not forecast"); return
     }
-    guard case .insufficient = QuotaForecast().summarize([
+    guard case .nextReset = QuotaForecast().summarize([
         account("a", [window(1, reset: 7100)]),
-    ], now: forecastNow).outcome else { Issue.record("Early data must not forecast"); return }
+    ], now: forecastNow).outcome else { Issue.record("Early data should show the known reset"); return }
+}
+
+@Test func `New unused accounts and reserve do not blank the entire forecast`() throws {
+    func weekly(_ used: Double, elapsed: Double, lane: String? = nil) -> QuotaWindow {
+        QuotaWindow(
+            id: lane ?? "weekly",
+            label: lane ?? "Weekly",
+            periodSeconds: 604_800,
+            lane: lane,
+            usedPercent: used,
+            resetsAt: forecastNow.addingTimeInterval(604_800 - elapsed))
+    }
+    let readings = [
+        account("primary", [weekly(11, elapsed: 7200)]),
+        account("secondary", [weekly(0, elapsed: 60)]),
+        account("last", [weekly(100, elapsed: 604_800 - 28800), weekly(0, elapsed: 10, lane: "reserve")]),
+        account("btc", [weekly(98, elapsed: 172_800)]),
+    ]
+    let summary = QuotaForecast().summarize(readings, now: forecastNow)
+    guard case let .resetFirst(date) = summary.outcome else { Issue.record("Expected a useful reset result"); return }
+    #expect(date == forecastNow.addingTimeInterval(28800))
+    #expect(summary.details.contains("No consumption observed"))
+    let projection = try QuotaForecast().project(
+        account: "primary",
+        window: #require(readings[0].snapshot?.windows[0]),
+        now: forecastNow)
+    #expect(projection.exhaustion != nil)
 }
