@@ -1,0 +1,15 @@
+included:
+  - Sources
+  - Tests
+excluded:
+  - .build
+disabled_rules:
+  - identifier_name
+  - opening_brace
+  - trailing_comma
+  - large_tuple
+  - function_body_length
+  - type_body_length
+  - cyclomatic_complexity
+  - nesting
+line_length: 140

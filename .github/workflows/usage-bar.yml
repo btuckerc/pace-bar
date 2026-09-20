@@ -1,0 +1,23 @@
+name: Usage Bar
+on:
+  push:
+    branches: [personal-usage-bar]
+    paths: ['UsageBar/**', '.github/workflows/usage-bar.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: macos-15
+    defaults:
+      run:
+        working-directory: UsageBar
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo xcode-select -s /Applications/Xcode_26.2.app/Contents/Developer
+      - run: swift --version
+      - run: make test check package
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Usage-Bar-macOS
+          path: UsageBar/dist/

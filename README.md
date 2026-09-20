@@ -1,3 +1,5 @@
+> **Personal fork:** Tucker’s lightweight Codex / OpenRouter / nous menu-bar app lives in [UsageBar/](UsageBar/README.md). Build that standalone package; the upstream CodexBar documentation follows below.
+
 # CodexBar 🎚️ — May your tokens never run out.
 
 > Every AI coding limit, in your menu bar.
