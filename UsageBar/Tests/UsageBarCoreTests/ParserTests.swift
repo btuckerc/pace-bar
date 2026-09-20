@@ -175,3 +175,23 @@ private func json(_ text: String) -> Data { Data(text.utf8) }
         try CodexAccount.parse(json("{\"tokens\":{\"access_token\":\"test\"}}"))
     }
 }
+
+@Test func `Account aliases hide emails and follow the requested order`() throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    var paths: [String] = []
+    for name in ["main", "btc", "last", "second"] {
+        let home = directory.appendingPathComponent(name)
+        try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
+        let file = home.appendingPathComponent("auth.json")
+        let claims = Data("{\"email\":\"private@example.com\"}".utf8).base64EncodedString()
+        try json("""
+        {"tokens":{"access_token":"fixture","account_id":"\(name)","id_token":"e30.\(claims).signature"}}
+        """).write(to: file)
+        paths.append(file.path)
+    }
+    let accounts = try CodexAccount.discover(paths: paths)
+    #expect(accounts.map(\.label) == ["primary", "secondary", "last", "btc"])
+    #expect(accounts.map(\.id) == ["main", "second", "last", "btc"])
+    #expect(!accounts.contains { $0.label.contains("@") })
+}

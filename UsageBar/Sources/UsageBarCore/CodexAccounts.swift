@@ -10,20 +10,21 @@ public struct CodexAccount: Identifiable, Sendable {
         guard let id = auth.account, !id.isEmpty else {
             throw UsageError.message("Codex account identity missing.")
         }
-        let root = try UsageParser.object(data)
-        let tokens = root["tokens"] as? [String: Any] ?? [:]
-        let jwt = (tokens["id_token"] as? String ?? "").split(separator: ".")
-        var label = String(id.prefix(8))
-        if jwt.count == 3 {
-            var encoded = String(jwt[1]).replacingOccurrences(of: "-", with: "+").replacingOccurrences(
-                of: "_",
-                with: "/")
-            encoded += String(repeating: "=", count: (4 - encoded.count % 4) % 4)
-            if let payload = Data(base64Encoded: encoded),
-               let claims = try? UsageParser.object(payload), let email = claims["email"] as? String
-            { label = email }
+        return CodexAccount(id: id, label: "account", token: auth.token)
+    }
+
+    private static func rank(_ label: String) -> Int {
+        ["primary", "secondary", "last", "btc"].firstIndex(of: label) ?? 4
+    }
+
+    private static func nickname(path: String, primary: Bool) -> String {
+        if primary { return "primary" }
+        switch Configuration.expand(path).deletingLastPathComponent().lastPathComponent {
+        case "second", "secondary": return "secondary"
+        case "last": return "last"
+        case "btc": return "btc"
+        default: return "account"
         }
-        return CodexAccount(id: id, label: label, token: auth.token)
     }
 
     /// Read existing homes only; never copy, refresh or rewrite credentials.
@@ -42,23 +43,33 @@ public struct CodexAccount: Identifiable, Sendable {
         var accounts: [String: (CodexAccount, Date)] = [:]
         var order: [String] = []
         for path in paths where FileManager.default.fileExists(atPath: Configuration.expand(path).path) {
+            let label = Self.nickname(path: path, primary: path == paths.first)
             let account: CodexAccount
             do {
-                account = try Self.parse(Configuration.boundedRead(path))
+                let parsed = try Self.parse(Configuration.boundedRead(path))
+                account = CodexAccount(id: parsed.id, label: label, token: parsed.token)
             } catch {
                 // Keep an unreadable source visible; never substitute another identity's usage.
                 account = CodexAccount(
                     id: Configuration.expand(path).path,
-                    label: Configuration.expand(path).deletingLastPathComponent().lastPathComponent,
+                    label: label,
                     token: "")
             }
             let attributes = try FileManager.default.attributesOfItem(atPath: Configuration.expand(path).path)
             let modified = attributes[.modificationDate] as? Date ?? .distantPast
             if accounts[account.id] == nil { order.append(account.id) }
-            if modified > (accounts[account.id]?.1 ?? .distantPast) { accounts[account.id] = (account, modified) }
+            if let previous = accounts[account.id] {
+                let preferredLabel = Self.rank(previous.0.label) <= Self.rank(label) ? previous.0.label : label
+                let latest = modified > previous.1 ? account : previous.0
+                accounts[account.id] = (
+                    CodexAccount(id: account.id, label: preferredLabel, token: latest.token),
+                    max(modified, previous.1))
+            } else {
+                accounts[account.id] = (account, modified)
+            }
         }
         guard !order.isEmpty else { throw UsageError.message("No Codex accounts found.") }
-        return order.compactMap { accounts[$0]?.0 }
+        return order.compactMap { accounts[$0]?.0 }.sorted { Self.rank($0.label) < Self.rank($1.label) }
     }
 }
 

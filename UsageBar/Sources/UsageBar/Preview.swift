@@ -14,7 +14,7 @@ enum Preview {
         store.codex = (1...4).map {
             CodexReading(
                 id: "fixture-\($0)",
-                label: "account\($0)@example.com",
+                label: ["primary", "secondary", "last", "btc"][$0 - 1],
                 snapshot: snapshot,
                 updated: Date(),
                 error: nil)
@@ -30,7 +30,7 @@ enum Preview {
         """.utf8), model: "Example-9B-Q5_K_M")
         let view = Dashboard(store: store, openSettings: {}).background(Color(nsColor: .windowBackgroundColor))
         let hosting = NSHostingView(rootView: view)
-        hosting.frame = NSRect(x: 0, y: 0, width: 390, height: 540)
+        hosting.frame = NSRect(x: 0, y: 0, width: 390, height: 450)
         hosting.layoutSubtreeIfNeeded()
         guard let bitmap = hosting.bitmapImageRepForCachingDisplay(in: hosting.bounds)
         else { throw UsageError.message("Preview rendering failed") }

@@ -41,7 +41,7 @@ struct Dashboard: View {
             .buttonStyle(.borderless).font(.caption).foregroundStyle(.secondary)
             .padding(.horizontal, 18).padding(.vertical, 10)
         }
-        .frame(width: 390, height: 540)
+        .frame(width: 390, height: 450)
     }
 
     private var codexSection: some View {
@@ -51,23 +51,20 @@ struct Dashboard: View {
                 let stale = account.error != nil || account.updated.map {
                     Date().timeIntervalSince($0) > (self.store.constrained ? 1800 : 600)
                 } ?? false
-                VStack(alignment: .leading, spacing: 5) {
-                    HStack(spacing: 6) {
-                        Text(account.label).lineLimit(1).truncationMode(.middle)
-                            .font(.system(size: 11, weight: .medium))
-                        Spacer(minLength: 4)
-                        Text(account.snapshot?.plan?.capitalized ?? "—")
-                            .font(.system(size: 10)).foregroundStyle(.secondary)
+                HStack(alignment: .top, spacing: 12) {
+                    HStack(spacing: 4) {
+                        Text(account.label).font(.system(size: 11, weight: .medium))
                         if stale {
                             Image(systemName: "exclamationmark.circle.fill").foregroundStyle(.orange)
-                                .font(.caption).help(account.error ?? "Last reading is stale")
+                                .font(.system(size: 9)).help(account.error ?? "Last reading is stale")
                         }
                     }
+                    .frame(width: 70, alignment: .leading)
                     .help(self.accountHelp(account))
                     if let snapshot = account.snapshot {
                         HStack(spacing: 12) {
                             ForEach(snapshot.windows) { window in
-                                VStack(spacing: 4) {
+                                VStack(spacing: 5) {
                                     HStack(spacing: 4) {
                                         Text(window.label == "Weekly" ? "Week" : window.label)
                                             .foregroundStyle(.secondary)
@@ -87,9 +84,11 @@ struct Dashboard: View {
                         .opacity(stale ? 0.55 : 1)
                     } else {
                         Text("—").foregroundStyle(.secondary)
+                        Spacer()
                     }
                 }
             }
+
             if self.store.codex.isEmpty { Text("—").foregroundStyle(.secondary) }
         }
     }
@@ -197,7 +196,12 @@ struct Dashboard: View {
     }
 
     private func accountHelp(_ account: CodexReading) -> String {
-        [account.label, account.error, account.updated.map { "Updated \($0.formatted())" }]
+        [
+            account.label,
+            account.snapshot?.plan?.capitalized,
+            account.error,
+            account.updated.map { "Updated \($0.formatted())" },
+        ]
             .compactMap(\.self).joined(separator: "\n")
     }
 
