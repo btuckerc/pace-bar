@@ -196,16 +196,14 @@ private func json(_ text: String) -> Data { Data(text.utf8) }
     #expect(!accounts.contains { $0.label.contains("@") })
 }
 
-@Test func `Compact quota titles preserve durations and reserve identity`() throws {
+@Test func `Compact quota titles preserve durations without advertising model fallback as reserve`() throws {
     let value = try UsageParser.codex(json("""
     {"rate_limit":{"primary_window":{"used_percent":3,"reset_at":1800000000,"limit_window_seconds":18000},
     "secondary_window":{"used_percent":4,"reset_at":1800000000,"limit_window_seconds":604800}},
     "additional_rate_limits":[{"limit_name":"gpt-reserve","rate_limit":{"primary_window":{
     "used_percent":0,"reset_at":1800000000,"limit_window_seconds":604800}}}]}
     """))
-    #expect(value.windows.map(\.compactLabel) == ["5h", "7d", "Reserve · 7d"])
-    #expect(value.windows[2].label == "gpt-reserve · Weekly")
-    #expect(value.windows[2].remainingPercent == 100)
+    #expect(value.windows.map(\.compactLabel) == ["5h", "7d"])
 }
 
 @Test func `Hardware energy deltas convert to Wh average watts and cost`() {
@@ -265,4 +263,42 @@ private func json(_ text: String) -> Data { Data(text.utf8) }
     config.nousMetricsURL = "http://host:8082"
     config.electricityUSDPerKWh = -1
     #expect(throws: (any Error).self) { try config.validate() }
+}
+
+@Test func `Banked reset count uses authoritative inventory and never fabricates zero`() throws {
+    func parse(_ credits: String) throws -> CodexSnapshot {
+        try UsageParser.codex(json("""
+        {"rate_limit":{"primary_window":{"used_percent":10,"reset_at":1800000000,"limit_window_seconds":604800}},
+        "rate_limit_reset_credits":\(credits)}
+        """))
+    }
+    #expect(try parse("{\"available_count\":0,\"applicable_available_count\":0}").availableResets == 0)
+    #expect(try parse("{\"available_count\":3,\"applicable_available_count\":1}").availableResets == 3)
+    for invalid in [
+        "null",
+        "{}",
+        "{\"available_count\":-1}",
+        "{\"available_count\":1.5}",
+        "{\"available_count\":true}",
+    ] {
+        #expect(try parse(invalid).availableResets == nil)
+    }
+}
+
+@Test func `Banked reset total requires fresh complete distinct account inventory`() {
+    let now = Date()
+    func reading(_ id: String, _ count: Int?, date: Date? = nil) -> CodexReading {
+        CodexReading(
+            id: id,
+            label: id,
+            snapshot: CodexSnapshot(windows: [], plan: "pro", availableResets: count),
+            updated: date ?? now,
+            error: nil)
+    }
+    #expect(CodexResetInventory.total([reading("a", 0), reading("b", 0)], now: now) == 0)
+    #expect(CodexResetInventory.total([reading("a", 1), reading("b", 2)], now: now) == 3)
+    #expect(CodexResetInventory.total([reading("a", 0), reading("b", nil)], now: now) == nil)
+    #expect(CodexResetInventory.total([reading("a", 0, date: now.addingTimeInterval(-601))], now: now) == nil)
+    #expect(CodexResetInventory.total([reading("a", 1), reading("a", 1)], now: now) == nil)
+    #expect(CodexResetInventory.total([], now: now) == nil)
 }

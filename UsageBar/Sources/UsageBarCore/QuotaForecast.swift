@@ -93,6 +93,19 @@ public struct QuotaForecast: Sendable, Codable {
         }
     }
 
+    func activeDayTotals(account: String, window: QuotaWindow, now: Date, calendar: Calendar) -> [Date: Double] {
+        let today = calendar.startOfDay(for: now)
+        let cutoff = calendar.date(byAdding: .day, value: -30, to: today) ?? today
+        var totals: [Date: Double] = [:]
+        for day in self.history[self.key(account: account, window: window)]?.days ?? [] {
+            let date = calendar.startOfDay(for: day.date)
+            if date >= cutoff, date < today, day.consumed.isFinite, day.consumed > 0 {
+                totals[date, default: 0] += day.consumed
+            }
+        }
+        return totals
+    }
+
     public func project(
         account: String,
         window: QuotaWindow,

@@ -30,6 +30,7 @@ public struct QuotaWindow: Identifiable, Sendable, Equatable {
 public struct CodexSnapshot: Sendable {
     public let windows: [QuotaWindow]
     public let plan: String?
+    public var availableResets: Int?
 }
 
 public struct OpenRouterSnapshot: Sendable {
@@ -126,10 +127,16 @@ public enum UsageParser {
         var windows = self.windows(root["rate_limit"], prefix: "Codex")
         for (index, extra) in (root["additional_rate_limits"] as? [[String: Any]] ?? []).enumerated() {
             let name = extra["limit_name"] as? String ?? extra["metered_feature"] as? String ?? "Additional \(index + 1)"
+            // This is a smaller-model fallback, not extra capacity for the main models.
+            // The live response identifies normal_model_slug and a luna_reserve upsell.
+            guard name != "gpt-reserve" else { continue }
             windows += self.windows(extra["rate_limit"], prefix: name)
         }
         guard !windows.isEmpty else { throw UsageError.message("No subscription quota windows returned.") }
-        return CodexSnapshot(windows: windows, plan: root["plan_type"] as? String)
+        let credits = root["rate_limit_reset_credits"] as? [String: Any]
+        let count = self.number(credits?["available_count"])
+        let available = count.flatMap { $0 <= 1_000_000 && $0.rounded(.down) == $0 ? Int($0) : nil }
+        return CodexSnapshot(windows: windows, plan: root["plan_type"] as? String, availableResets: available)
     }
 
     private static func windows(_ raw: Any?, prefix: String) -> [QuotaWindow] {

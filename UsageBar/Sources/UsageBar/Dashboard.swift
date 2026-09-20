@@ -44,8 +44,20 @@ struct Dashboard: View {
     }
 
     private var codexSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            self.heading("Codex", provider: "Codex", detail: nil)
+        let now = Date()
+        let runway = self.store.quotaForecast.runway(
+            self.store.codex,
+            now: now,
+            freshness: self.store.constrained ? 1800 : 600)
+        let resets = self.store.errors["Codex"] == nil ? CodexResetInventory.total(
+            self.store.codex, now: now, freshness: self.store.constrained ? 1800 : 600) : nil
+        return VStack(alignment: .leading, spacing: 12) {
+            self.heading(
+                "Codex",
+                provider: "Codex",
+                detail: resets.map { "\($0) \($0 == 1 ? "reset" : "resets")" } ?? "— resets")
+                .help(
+                    "Available banked resets across all accounts. Does not count scheduled quota renewals. Unknown or stale counts show —.")
             ForEach(self.store.codex) { account in
                 let stale = self.store.errors["Codex"] != nil || account.error != nil || account.updated.map {
                     Date().timeIntervalSince($0) > (self.store.constrained ? 1800 : 600)
@@ -63,7 +75,12 @@ struct Dashboard: View {
                     if let snapshot = account.snapshot {
                         VStack(spacing: 10) {
                             ForEach(snapshot.windows) { window in
-                                let estimate = self.exhaustion(account: account, window: window, stale: stale)
+                                let estimate = self.exhaustion(
+                                    account: account,
+                                    window: window,
+                                    stale: stale,
+                                    runway: runway,
+                                    now: now)
                                 VStack(spacing: 5) {
                                     HStack(spacing: 4) {
                                         Text(estimate.title).lineLimit(1)
@@ -96,8 +113,13 @@ struct Dashboard: View {
     private func exhaustion(
         account: CodexReading,
         window: QuotaWindow,
-        stale: Bool) -> (title: String, detail: String)
+        stale: Bool,
+        runway: QuotaRunway,
+        now: Date) -> (title: String, detail: String)
     {
+        if window.lane == nil {
+            return self.orderedEstimate(account: account, window: window, stale: stale, runway: runway, now: now)
+        }
         let projection = self.store.quotaForecast.project(account: account.id, window: window, now: Date())
         let value: String
         let detail: String
@@ -127,8 +149,43 @@ struct Dashboard: View {
             detail + (self.store.errors["History"].map { " \($0)" } ?? ""))
     }
 
+    private func orderedEstimate(
+        account: CodexReading,
+        window: QuotaWindow,
+        stale: Bool,
+        runway: QuotaRunway,
+        now: Date) -> (title: String, detail: String)
+    {
+        guard !stale else { return ("—", "Fresh account data is needed for the ordered runway.") }
+        guard let entry = runway.entries[account.id] else { return ("—", runway.explanation) }
+        var detail = runway.explanation + (self.store.errors["History"].map { " \($0)" } ?? "")
+        let refill = entry.refills > 0 ? "↻ " : ""
+        if entry.refills > 0 { detail += " This account refills before its projected depletion." }
+        if entry.interrupted { detail += " Its turn is interrupted by an earlier account's refill." }
+        if let start = entry.startsAt, let end = entry.exhaustsAt {
+            detail += " First use: \(start.formatted()). First depletion: \(end.formatted())."
+            let from = start.timeIntervalSince(now) < 1 ? "Now" : self.scheduleDay(start, now: now)
+            return (refill + "≈ \(from) → \(self.forecastDate(end))", detail)
+        }
+        if let through = entry.coveredThrough {
+            return (refill + "Through " + self.scheduleDay(through, now: now), detail)
+        }
+        if entry.startsAt != nil { return ("Later", detail) }
+        if window
+            .remainingPercent == 0 { return ("Capped", detail + " No use is scheduled before the forecast horizon.") }
+        return ("Later", detail + " Not needed before the forecast horizon.")
+    }
+
+    private func scheduleDay(_ date: Date, now: Date) -> String {
+        date.timeIntervalSince(now) >= 604_800
+            ? date.formatted(.dateTime.month(.abbreviated).day())
+            : date.formatted(.dateTime.weekday(.abbreviated))
+    }
+
     private func forecastDate(_ date: Date) -> String {
-        date.formatted(.dateTime.weekday(.abbreviated).hour().minute())
+        date.timeIntervalSinceNow >= 604_800
+            ? date.formatted(.dateTime.month(.abbreviated).day().hour().minute())
+            : date.formatted(.dateTime.weekday(.abbreviated).hour().minute())
     }
 
     private var routerSection: some View {
@@ -225,15 +282,17 @@ struct Dashboard: View {
         }
     }
 
+    @ViewBuilder
     private func status(_ provider: String) -> some View {
         let error = self.store.errors[provider] ?? (provider == "OpenRouter" ? self.store.router?.warning : nil)
         let date = self.store.updated[provider]
         let stale = date.map { Date().timeIntervalSince($0) > (self.store.constrained ? 1800 : 600) } ?? false
-        return Image(systemName: error != nil || stale ? "exclamationmark.circle.fill" : "circle.fill")
-            .font(.system(size: error != nil || stale ? 9 : 4))
-            .foregroundStyle(error != nil || stale ? Color.orange : Color.secondary.opacity(0.4))
-            .help(error ?? date.map { "Updated \($0.formatted())" } ?? "Waiting for reading")
-            .accessibilityLabel(error ?? "\(provider) status")
+        if error != nil || stale {
+            Image(systemName: "exclamationmark.circle.fill")
+                .font(.system(size: 9)).foregroundStyle(Color.orange)
+                .help(error ?? date.map { "Updated \($0.formatted())" } ?? "Waiting for reading")
+                .accessibilityLabel(error ?? "\(provider) reading is stale")
+        }
     }
 
     private func accountHelp(_ account: CodexReading) -> String {

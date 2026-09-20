@@ -9,6 +9,10 @@ struct Probe {
         do {
             let config = try Configuration.load()
             let services = Services()
+            if CommandLine.arguments.count == 2, CommandLine.arguments[1] == "--runway" {
+                try await self.showRunway(configuration: config, services: services)
+                return
+            }
             if CommandLine.arguments.count == 3, CommandLine.arguments[1] == "--import-history" {
                 try await self.importHistory(path: CommandLine.arguments[2], configuration: config, services: services)
                 return
@@ -83,6 +87,31 @@ struct Probe {
                 let projection = forecast.project(account: reading.id, window: window, now: Date())
                 print("\(reading.label) · \(window.compactLabel): \(projection.method)")
             }
+        }
+    }
+
+    private static func showRunway(configuration: Configuration, services: Services) async throws {
+        var readings: [CodexReading] = []
+        for account in try CodexAccount.discover(configuration) {
+            let snapshot = try await services.codex(account: account)
+            readings.append(CodexReading(
+                id: account.id,
+                label: account.label,
+                snapshot: snapshot,
+                updated: Date(),
+                error: nil))
+        }
+        let history = await QuotaHistoryStore().snapshot()
+        let runway = history.runway(readings, now: Date())
+        print("Pooled active days: \(runway.activeDays); daily percentage points: \(runway.dailyConsumption ?? 0)")
+        print(runway.explanation)
+        print("Available banked resets: " +
+            (CodexResetInventory.total(readings, now: Date()).map(String.init) ?? "unknown"))
+        for reading in readings {
+            guard let entry = runway.entries[reading.id] else { continue }
+            let start = entry.startsAt?.formatted() ?? "later"
+            let end = entry.exhaustsAt?.formatted() ?? "beyond horizon"
+            print("\(reading.label): \(start) → \(end); refills=\(entry.refills); interrupted=\(entry.interrupted)")
         }
     }
 }

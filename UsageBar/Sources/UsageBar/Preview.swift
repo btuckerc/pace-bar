@@ -8,7 +8,7 @@ enum Preview {
     static func render(to path: String) throws {
         let store = UsageStore()
         let snapshot = try UsageParser.codex(Data("""
-        {"plan_type":"pro","rate_limit":{"primary_window":{
+        {"plan_type":"pro","rate_limit_reset_credits":{"available_count":0},"rate_limit":{"primary_window":{
         "used_percent":23,"reset_at":\(Int(Date().timeIntervalSince1970 + 518_400)),"limit_window_seconds":604800}}}
         """.utf8))
         store.codex = (1...4).map {
@@ -39,7 +39,7 @@ enum Preview {
         store.gpuEnergy.record(millijoules: 1000, uptime: 1000)
         store.gpuEnergy.record(millijoules: 360_001_000, uptime: 4600)
         store.codex[2].snapshot = try UsageParser.codex(Data("""
-        {"plan_type":"pro","rate_limit":{"primary_window":{
+        {"plan_type":"pro","rate_limit_reset_credits":{"available_count":0},"rate_limit":{"primary_window":{
         "used_percent":100,"reset_at":\(Int(Date().timeIntervalSince1970 + 28800)),"limit_window_seconds":604800}},
         "additional_rate_limits":[{"limit_name":"gpt-reserve","rate_limit":{"primary_window":{
         "used_percent":0,"reset_at":\(Int(Date().timeIntervalSince1970 + 604_800)),"limit_window_seconds":604800}}}]}
@@ -50,7 +50,7 @@ enum Preview {
                 let start = Calendar.current.startOfDay(for: Date()).addingTimeInterval(-Double(ago) * 86400 + 3600)
                 for (offset, used) in [(0.0, 0.0), (3600.0, [20.0, 5.0, 0.0, 60.0][index])] {
                     let sample = try UsageParser.codex(Data("""
-                    {"plan_type":"pro","rate_limit":{"primary_window":{
+                    {"plan_type":"pro","rate_limit_reset_credits":{"available_count":0},"rate_limit":{"primary_window":{
                     "used_percent":\(used),"reset_at":\(Int(start.timeIntervalSince1970 + 604_800)),"limit_window_seconds":604800}}}
                     """.utf8))
                     store.quotaForecast.record(

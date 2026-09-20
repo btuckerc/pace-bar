@@ -22,6 +22,11 @@ public actor QuotaHistoryStore {
         }
     }
 
+    public func snapshot() -> QuotaForecast {
+        self.load()
+        return self.forecast ?? QuotaForecast()
+    }
+
     public func record(_ readings: [CodexReading]) -> (QuotaForecast, Bool) {
         self.load()
         var current = self.forecast ?? QuotaForecast()

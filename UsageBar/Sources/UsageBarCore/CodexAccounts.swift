@@ -88,3 +88,17 @@ public struct CodexReading: Identifiable, Sendable {
         self.error = error
     }
 }
+
+public enum CodexResetInventory {
+    public static func total(_ readings: [CodexReading], now: Date, freshness: TimeInterval = 600) -> Int? {
+        guard !readings.isEmpty, Set(readings.map(\.id)).count == readings.count else { return nil }
+        var total = 0
+        for reading in readings {
+            guard reading.error == nil, let date = reading.updated,
+                  now.timeIntervalSince(date) >= 0, now.timeIntervalSince(date) <= freshness,
+                  let count = reading.snapshot?.availableResets, count >= 0, count <= 1_000_000 else { return nil }
+            total += count
+        }
+        return total
+    }
+}
