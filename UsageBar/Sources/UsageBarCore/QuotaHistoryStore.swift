@@ -11,7 +11,7 @@ public actor QuotaHistoryStore {
         self.file = file
     }
 
-    public func record(_ readings: [CodexReading]) -> (QuotaForecast, Bool) {
+    private func load() {
         if self.forecast == nil {
             // Cap input size and fail closed to fresh history if an old file is unreadable or malformed.
             let size = (try? self.file.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
@@ -20,12 +20,20 @@ public actor QuotaHistoryStore {
             }
             if self.forecast == nil { self.forecast = QuotaForecast() }
         }
+    }
+
+    public func record(_ readings: [CodexReading]) -> (QuotaForecast, Bool) {
+        self.load()
         var current = self.forecast ?? QuotaForecast()
         for reading in readings {
             if reading.error == nil, let snapshot = reading.snapshot, let date = reading.updated {
                 current.record(account: reading.id, windows: snapshot.windows, at: date)
             }
         }
+        return self.save(current)
+    }
+
+    private func save(_ current: QuotaForecast) -> (QuotaForecast, Bool) {
         self.forecast = current
         do {
             try FileManager.default.createDirectory(
@@ -37,5 +45,13 @@ public actor QuotaHistoryStore {
         } catch {
             return (current, false)
         }
+    }
+
+    public func importHistory(_ data: Data, readings: [CodexReading], now: Date) throws -> QuotaForecast {
+        self.load()
+        let merged = try QuotaBackfill.merge(data, into: self.forecast ?? QuotaForecast(), readings: readings, now: now)
+        let (saved, success) = self.save(merged)
+        guard success else { throw UsageError.message("Could not save imported quota history.") }
+        return saved
     }
 }

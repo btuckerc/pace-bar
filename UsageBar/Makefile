@@ -3,6 +3,7 @@ build:
 	swift build -c release --product UsageBar
 test:
 	swift test
+	python3 -m unittest discover -s scripts -p 'test_*.py'
 check:
 	../Scripts/install_lint_tools.sh swiftformat swiftlint
 	../.build/lint-tools/bin/swiftformat Sources Tests Package.swift --lint

@@ -9,6 +9,10 @@ struct Probe {
         do {
             let config = try Configuration.load()
             let services = Services()
+            if CommandLine.arguments.count == 3, CommandLine.arguments[1] == "--import-history" {
+                try await self.importHistory(path: CommandLine.arguments[2], configuration: config, services: services)
+                return
+            }
             let failures = await withTaskGroup(of: Bool.self, returning: Int.self) { group in
                 for provider in ["Codex", "OpenRouter", "Nous", "Host"] {
                     group.addTask {
@@ -52,6 +56,33 @@ struct Probe {
         } catch {
             print("Configuration: FAILED")
             exit(1)
+        }
+    }
+
+    private static func importHistory(path: String, configuration: Configuration, services: Services) async throws {
+        let file = URL(fileURLWithPath: path)
+        guard try (file.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? Int.max) <= 64 * 1024 * 1024 else {
+            throw UsageError.message("History import is too large.")
+        }
+        var readings: [CodexReading] = []
+        for account in try CodexAccount.discover(configuration) {
+            let snapshot = try await services.codex(account: account)
+            readings.append(CodexReading(
+                id: account.id,
+                label: account.label,
+                snapshot: snapshot,
+                updated: Date(),
+                error: nil))
+        }
+        let forecast = try await QuotaHistoryStore().importHistory(
+            Data(contentsOf: file),
+            readings: readings,
+            now: Date())
+        for reading in readings {
+            for window in reading.snapshot?.windows ?? [] {
+                let projection = forecast.project(account: reading.id, window: window, now: Date())
+                print("\(reading.label) · \(window.compactLabel): \(projection.method)")
+            }
         }
     }
 }

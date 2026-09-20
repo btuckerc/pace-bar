@@ -52,4 +52,21 @@ Time remaining is **current remaining percentage / historical daily pace × 24 h
 
 History records positive quota deltas from existing refreshes. The first reading is a baseline, not newly consumed quota. Scheduled and banked resets preserve past daily totals and establish a new baseline. Corrections within a cycle use a high-water mark to prevent double counting. Deltas spanning midnight are omitted rather than assigned to an invented day. No unobserved consumption or refills are fabricated; usage during app downtime and around resets may be missed, making the estimate optimistic. This is observed active-day consumption, not an exact provider billing ledger.
 
-Compact history is retained across launches and settings changes in `~/.local/share/usage-bar/quota-history.json` (owner-only permissions, hashed account/lane keys, no credentials, emails, or transcripts). At most 128 lanes and 31 daily totals per lane are retained; a small atomic save runs off the UI actor once per existing Codex refresh. There are no extra requests, timers, filesystem scans, model calls, or inference costs. Shared Codex session logs lack reliable account attribution, so they are not used for historical backfill. New installations show `Learning` until enough account-specific history has accumulated.
+Compact history is retained across launches and settings changes in `~/.local/share/usage-bar/quota-history.json` (owner-only permissions, hashed account/lane keys, no credentials, emails, or transcripts). At most 128 lanes and 31 daily totals per lane are retained; a small atomic save runs off the UI actor once per existing Codex refresh. There are no extra requests, timers, filesystem scans, model calls, or inference costs. Shared Codex logs do not identify accounts directly, but T3's retained session cursors and imported-transcript mappings can attribute historical quota snapshots. A one-time maintenance import can use those mappings; normal app operation never scans logs. Accounts without attributable history show `Learning` until enough observations accumulate.
+
+### Backfill existing T3 history
+
+Quit Usage Bar before importing so its in-memory history cannot overwrite the import. From `UsageBar/`:
+
+```sh
+history_dir=$(mktemp -d)
+python3 scripts/quota_backfill.py --output "$history_dir/quota.json"
+swift run UsageBarProbe --import-history "$history_dir/quota.json"
+rm "$history_dir/quota.json"
+rmdir "$history_dir"
+open "$HOME/Applications/Usage Bar.app"
+```
+
+The extractor reads T3's database read-only, maps provider instances through their configured auth homes, and reads the last 30 days of Codex quota metadata. Unmapped or conflicting sessions, copied pre-fork history, unrelated model lanes, and contradictory quota-cycle ownership are excluded. Child sessions inherit an unambiguous parent's mapping. Source files and identical snapshots are deduplicated. The temporary file contains quota metadata and account IDs with owner-only permissions; it has no tokens, emails, or conversation text. It is removed after import.
+
+The importer checks each account against a fresh quota response, requires the same plan, and matches quota duration rather than primary/secondary field position. Reset timestamps within 60 seconds are treated as one cycle to tolerate provider timestamp jitter. Daily overlaps use the larger observed total rather than adding duplicate consumption; repeating an import is safe. Current live baselines are preserved. This recovers observed quota consumption, not a complete billing ledger; unresolved history is omitted and account-slot sign-in changes outside retained metadata may limit attribution. Reserve is not inferred from another model's allowance.

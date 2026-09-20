@@ -53,7 +53,7 @@ public struct QuotaForecast: Sendable, Codable {
             }
             guard date > lane.last.date else { continue }
             let previous = lane.last
-            let sameCycle = previous.reset == point.reset
+            let sameCycle = abs(previous.reset.timeIntervalSince(point.reset)) <= 60
             // Use a high-water mark within a cycle so corrections/rebounds are not counted twice.
             let consumed = sameCycle ? max(0, point.used - previous.used) : 0
             // A cross-midnight gap cannot establish which day consumed the quota. Do not guess.
@@ -70,6 +70,25 @@ public struct QuotaForecast: Sendable, Codable {
                 used: sameCycle ? max(previous.used, point.used) : point.used,
                 reset: point.reset)
             lane.days.removeAll { $0.date < cutoff }
+            self.history[key] = lane
+        }
+    }
+
+    /// Use the larger daily total when sources overlap; re-importing cannot double consumption.
+    mutating func mergeHistory(_ imported: QuotaForecast, now: Date, calendar: Calendar) {
+        let cutoff = calendar.date(byAdding: .day, value: -30, to: calendar.startOfDay(for: now)) ?? now
+        for (key, incoming) in imported.history {
+            guard self.history[key] != nil || self.history.count < 128 else { continue }
+            var lane = self.history[key] ?? incoming
+            for day in incoming.days where day.date >= cutoff {
+                if let index = lane.days.firstIndex(where: { $0.date == day.date }) {
+                    lane.days[index].consumed = max(lane.days[index].consumed, day.consumed)
+                } else {
+                    lane.days.append(day)
+                }
+            }
+            if incoming.last.date > lane.last.date { lane.last = incoming.last }
+            lane.days = Array(lane.days.filter { $0.date >= cutoff }.sorted { $0.date < $1.date }.suffix(31))
             self.history[key] = lane
         }
     }
