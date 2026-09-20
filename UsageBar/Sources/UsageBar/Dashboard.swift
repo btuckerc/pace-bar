@@ -11,9 +11,9 @@ struct Dashboard: View {
             VStack(alignment: .leading, spacing: 16) {
                 self.codexSection
                 Divider().opacity(0.6)
-                self.routerSection
-                Divider().opacity(0.6)
                 self.nousSection
+                Divider().opacity(0.6)
+                self.routerSection
             }
             .padding(18)
             Divider()
@@ -95,16 +95,12 @@ struct Dashboard: View {
     private var routerSection: some View {
         VStack(alignment: .leading, spacing: 9) {
             self.heading("OpenRouter", provider: "OpenRouter", detail: nil)
-            HStack(alignment: .firstTextBaseline) {
-                Text(self.money(self.store.router?.balance))
-                    .font(.system(size: 22, weight: .medium, design: .rounded))
-                    .help("Account balance in USD")
-                Spacer()
-                self.metric("Day", self.money(self.store.router?.today)).help("API key spend today")
-                self.metric("Week", self.money(self.store.router?.week)).help("API key spend this week")
-                self.metric("Month", self.money(self.store.router?.month)).help("API key spend this month")
+            HStack(alignment: .top) {
+                self.metric("Balance", self.money(self.store.router?.balance))
+                    .help("Account-wide credit balance in USD")
+                self.metric("Total spent", self.money(self.store.router?.totalSpent))
+                    .help("Account-wide lifetime credit usage. Includes all keys; excludes third-party BYOK bills.")
             }
-            .monospacedDigit()
             if let cap = self.store.router?.keyRemaining {
                 Text("Cap \(self.money(cap))").font(.caption2).foregroundStyle(.secondary)
                     .help("Remaining spending allowance for this API key")
@@ -120,11 +116,8 @@ struct Dashboard: View {
             }
             HStack {
                 self.metric("Output", self.number(self.store.nous?.outputTokens))
-                Spacer()
                 self.metric("Input", self.number(self.store.nous?.promptTokens))
-                Spacer()
                 self.metric("Cache", self.number(self.store.nous?.cachedTokens))
-                Spacer()
                 self.metric("t/s", self.decimal(self.store.nous?.generationTPS))
             }
             .help(
@@ -138,9 +131,19 @@ struct Dashboard: View {
                 HStack(spacing: 16) {
                     self.hostMeter("GPU", value: self.store.host?.gpuPercent)
                     self.hostMeter("CPU", value: self.store.cpuPercent)
-                    Text("\(self.decimal(self.store.host?.watts)) W")
-                        .font(.system(size: 11)).monospacedDigit().help("GPU power draw")
                 }
+                HStack(alignment: .top) {
+                    self.metric("GPU W", self.decimal(self.store.host?.watts)).help("Current GPU board power draw")
+                    self.metric("Avg W", self.decimal(self.store.gpuEnergy.averageWatts))
+                    self.metric("Wh", self.decimal(self.store.gpuEnergy.wattHours))
+                    if let rate = self.store.configuration.electricityUSDPerKWh {
+                        self.metric("Est. cost", self.energyCost(self.store.gpuEnergy.cost(rate: rate)))
+                            .help("GPU energy × $\(rate)/kWh. Excludes the rest of the host and PSU losses.")
+                    }
+                }
+                .help(
+                    "GPU-only average power and energy since monitoring began. "
+                        + "Resets when Usage Bar restarts or a counter reset is detected.")
                 HStack {
                     Text("VRAM \(self.memory(self.store.host?.vramUsedMiB, self.store.host?.vramTotalMiB))")
                     Spacer()
@@ -209,6 +212,7 @@ struct Dashboard: View {
             Text(name).font(.system(size: 11)).foregroundStyle(.secondary)
             Text(value).font(.system(size: 13, weight: .medium)).monospacedDigit()
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private func reset(_ date: Date) -> String {
@@ -217,6 +221,12 @@ struct Dashboard: View {
         if seconds >= 86400 { return "\(Int(ceil(seconds / 86400)))d" }
         if seconds >= 3600 { return "\(Int(ceil(seconds / 3600)))h" }
         return "\(Int(ceil(seconds / 60)))m"
+    }
+
+    private func energyCost(_ value: Double?) -> String {
+        guard let value else { return "—" }
+        if value > 0, value < 0.01 { return "<1¢" }
+        return self.money(value)
     }
 
     private func money(_ value: Double?) -> String {

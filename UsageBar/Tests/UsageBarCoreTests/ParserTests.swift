@@ -207,3 +207,62 @@ private func json(_ text: String) -> Data { Data(text.utf8) }
     #expect(value.windows[2].label == "gpt-reserve · Weekly")
     #expect(value.windows[2].remainingPercent == 100)
 }
+
+@Test func `Hardware energy deltas convert to Wh average watts and cost`() {
+    var energy = GPUEnergy()
+    energy.record(millijoules: 1000, uptime: 100)
+    #expect(energy.wattHours == nil)
+    energy.record(millijoules: 3_601_000, uptime: 160)
+    #expect(energy.wattHours == 1)
+    #expect(energy.averageWatts == 60)
+    #expect(energy.cost(rate: 0.15) == 0.00015)
+    #expect(energy.cost(rate: nil) == nil)
+}
+
+@Test func `Energy resets do not create negative or borrowed consumption`() {
+    var energy = GPUEnergy()
+    energy.record(millijoules: 1000, uptime: 100)
+    energy.record(millijoules: 3_601_000, uptime: 160)
+    energy.record(millijoules: 10, uptime: 180)
+    #expect(energy.wattHours == nil)
+    energy.record(millijoules: 3_600_010, uptime: 240)
+    #expect(energy.wattHours == 1)
+    energy.record(millijoules: 7_200_010, uptime: 10)
+    #expect(energy.wattHours == nil)
+}
+
+@Test func `Missing energy does not turn into zero and long gaps use counter deltas`() {
+    var energy = GPUEnergy()
+    energy.record(millijoules: 0, uptime: 100)
+    energy.record(millijoules: nil, uptime: nil)
+    #expect(energy.wattHours == nil)
+    energy.record(millijoules: 360_000_000, uptime: 3700)
+    #expect(energy.wattHours == 100)
+    #expect(energy.averageWatts == 100)
+    energy.record(millijoules: .nan, uptime: 3800)
+    #expect(energy.wattHours == nil)
+}
+
+@Test func `Account spend remains correct when a particular key reports zero`() throws {
+    let value = try UsageParser.openRouter(
+        key: json("{\"data\":{\"usage_daily\":0,\"usage_weekly\":0,\"usage_monthly\":0}}"),
+        credits: json("{\"data\":{\"total_credits\":100,\"total_usage\":75}}"), warning: nil)
+    #expect(value.totalSpent == 75)
+    #expect(value.balance == 25)
+    #expect(value.month == 0)
+}
+
+@Test func `Optional energy settings decode older configuration and reject credential URLs`() throws {
+    let old = json("""
+    {"codexAuthFile":"test","openRouterAuthFile":"test","nousURL":"http://host:8080",
+    "nousSSHHost":"host","hostUtilization":true}
+    """)
+    var config = try JSONDecoder().decode(Configuration.self, from: old)
+    #expect(config.nousMetricsURL == nil)
+    #expect(config.electricityUSDPerKWh == nil)
+    config.nousMetricsURL = "http://user:secret@host:8082"
+    #expect(throws: (any Error).self) { try config.validate() }
+    config.nousMetricsURL = "http://host:8082"
+    config.electricityUSDPerKWh = -1
+    #expect(throws: (any Error).self) { try config.validate() }
+}

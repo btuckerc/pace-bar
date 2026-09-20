@@ -33,6 +33,7 @@ public struct CodexSnapshot: Sendable {
 }
 
 public struct OpenRouterSnapshot: Sendable {
+    public let totalSpent: Double?
     public let balance: Double?
     public let today: Double?
     public let week: Double?
@@ -60,6 +61,8 @@ public struct HostSnapshot: Sendable {
     public let gpuPercent: Double?
     public let vramUsedMiB: Double?
     public let vramTotalMiB: Double?
+    public let energyMilliJoules: Double?
+    public let uptime: Double?
     public let watts: Double?
     public let ramUsedMiB: Double?
     public let ramTotalMiB: Double?
@@ -167,7 +170,8 @@ public enum UsageParser {
             throw UsageError.message(warning ?? "No OpenRouter balance or usage returned.")
         }
         return OpenRouterSnapshot(
-            balance: balance, today: today, week: week, month: month, keyRemaining: remaining, warning: warning)
+            totalSpent: self.number(creditValues?["total_usage"]), balance: balance, today: today, week: week,
+            month: month, keyRemaining: remaining, warning: warning)
     }
 
     public static func loadedModel(_ data: Data) throws -> String? {
@@ -212,6 +216,8 @@ public enum UsageParser {
         let lines = text.split(separator: "\n").map(String.init)
         let gpu = lines.first(where: { $0.hasPrefix("GPU ") })?.dropFirst(4)
             .split(separator: ",").map { Double($0.trimmingCharacters(in: .whitespaces)) } ?? []
+        let energy = lines.first(where: { $0.hasPrefix("ENERGY ") })?
+            .split(whereSeparator: \.isWhitespace).dropFirst().compactMap { Double($0) } ?? []
         let memory = lines.first(where: { $0.hasPrefix("Mem:") })?
             .split(whereSeparator: \.isWhitespace).dropFirst().compactMap { Double($0) } ?? []
         let cpuValues = lines.first(where: { $0.hasPrefix("cpu ") })?
@@ -225,6 +231,8 @@ public enum UsageParser {
             gpuPercent: gpu.count >= 4 ? gpu[0] : nil,
             vramUsedMiB: gpu.count >= 4 ? gpu[1] : nil,
             vramTotalMiB: gpu.count >= 4 ? gpu[2] : nil,
+            energyMilliJoules: energy.count == 2 ? energy[0] : nil,
+            uptime: energy.count == 2 ? energy[1] : nil,
             watts: gpu.count >= 4 ? gpu[3] : nil,
             ramUsedMiB: memory.count >= 2 ? memory[1] : nil,
             ramTotalMiB: memory.count >= 2 ? memory[0] : nil, cpu: cpu)

@@ -24,13 +24,14 @@ struct Probe {
                                 detail = "\(accounts.count) distinct accounts"
                             case "OpenRouter":
                                 let value = try await services.openRouter(config)
-                                detail = "balance=\(value.balance != nil), key spend=\(value.month != nil)"
+                                detail = "balance=\(value.balance != nil), account spend=\(value.totalSpent != nil)"
                             case "Nous":
                                 let value = try await services.nous(config)
                                 detail = "model loaded=\(value.model != nil), token counters=\(value.outputTokens != nil)"
                             default:
                                 let value = try await services.host(config)
-                                detail = "GPU=\(value.gpuPercent != nil), RAM=\(value.ramUsedMiB != nil), CPU=\(value.cpu != nil)"
+                                detail = "GPU=\(value.gpuPercent != nil), RAM=\(value.ramUsedMiB != nil)"
+                                    + ", CPU=\(value.cpu != nil), energy=\(value.energyMilliJoules != nil)"
                             }
                             print("\(provider): OK (\(detail))")
                             return false

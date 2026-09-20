@@ -69,26 +69,8 @@ public actor Services {
     public func openRouter(_ configuration: Configuration) async throws -> OpenRouterSnapshot {
         let token = try Credentials.openRouter(Configuration.boundedRead(configuration.openRouterAuthFile))
         let headers = ["Authorization": "Bearer \(token)", "Accept": "application/json"]
-        // Independent, optional enrichments: preserve whichever succeeds and label its scope.
-        var key: Data?
-        var credits: Data?
-        var warnings: [String] = []
-        do {
-            key = try await self.get(URL(string: "https://openrouter.ai/api/v1/key")!, headers: headers)
-            _ = try UsageParser.object(key!)
-        } catch {
-            key = nil
-            warnings.append("Key usage unavailable")
-        }
-        do {
-            credits = try await self.get(URL(string: "https://openrouter.ai/api/v1/credits")!, headers: headers)
-            _ = try UsageParser.object(credits!)
-        } catch {
-            credits = nil
-            warnings.append("Account balance unavailable")
-        }
-        return try UsageParser.openRouter(
-            key: key, credits: credits, warning: warnings.isEmpty ? nil : warnings.joined(separator: "; "))
+        let credits = try await self.get(URL(string: "https://openrouter.ai/api/v1/credits")!, headers: headers)
+        return try UsageParser.openRouter(key: nil, credits: credits, warning: nil)
     }
 
     public func nous(_ configuration: Configuration) async throws -> NousSnapshot {
@@ -104,6 +86,12 @@ public actor Services {
 
     public func host(_ configuration: Configuration) async throws -> HostSnapshot {
         try configuration.validate()
+        if let origin = configuration.nousMetricsURL, !origin.isEmpty {
+            let data = try await self.get(URL(string: origin)!.appendingPathComponent("snapshot"), limit: 16384)
+            guard let text = String(data: data, encoding: .utf8)
+            else { throw UsageError.message("Invalid host snapshot.") }
+            return try UsageParser.host(text)
+        }
         let text = try await HostProcess.sample(host: configuration.nousSSHHost)
         return try UsageParser.host(text)
     }
@@ -129,10 +117,27 @@ enum HostProcess {
         process.executableURL = URL(fileURLWithPath: "/usr/bin/ssh")
         // Fixed command, no user strings interpreted by the remote shell. No agent
         // forwarding, PTY, auth prompts, host mutation, or persistent remote process.
+        let energy = """
+        python3 - <<'PY'
+        import ctypes
+        try:
+            n = ctypes.CDLL("libnvidia-ml.so.1")
+            if n.nvmlInit_v2() == 0:
+                h = ctypes.c_void_p()
+                v = ctypes.c_ulonglong()
+                if n.nvmlDeviceGetHandleByIndex_v2(0, ctypes.byref(h)) == 0:
+                    if n.nvmlDeviceGetTotalEnergyConsumption(h, ctypes.byref(v)) == 0:
+                        with open("/proc/uptime") as f:
+                            print("ENERGY", v.value, f.read().split()[0])
+                n.nvmlShutdown()
+        except (OSError, AttributeError):
+            pass
+        PY
+        """
         let command = "LC_ALL=C; export LC_ALL; "
             + "nvidia-smi --query-gpu=utilization.gpu,memory.used,memory.total,power.draw "
             + "--format=csv,noheader,nounits | sed 's/^/GPU /'; "
-            + "free -m; head -n 1 /proc/stat"
+            + "free -m; head -n 1 /proc/stat; " + energy
         process.arguments = [
             "-T", "-o", "BatchMode=yes", "-o", "ForwardAgent=no", "-o", "ConnectTimeout=3",
             "-o", "ConnectionAttempts=1", "-o", "StrictHostKeyChecking=yes",

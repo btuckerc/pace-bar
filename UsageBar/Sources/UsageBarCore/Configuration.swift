@@ -6,6 +6,8 @@ public struct Configuration: Codable, Sendable {
     public var nousURL = "http://nous:8080"
     public var nousSSHHost = "nous"
     public var hostUtilization = true
+    public var electricityUSDPerKWh: Double?
+    public var nousMetricsURL: String?
 
     public init() {}
 
@@ -21,6 +23,15 @@ public struct Configuration: Codable, Sendable {
     }
 
     public func validate() throws {
+        if let rate = self.electricityUSDPerKWh, !rate.isFinite || rate < 0 {
+            throw UsageError.message("Electricity rate must be a nonnegative USD/kWh amount.")
+        }
+        if let origin = self.nousMetricsURL, !origin.isEmpty {
+            guard let url = URL(string: origin), ["http", "https"].contains(url.scheme),
+                  url.host != nil, url.user == nil, url.password == nil, url.query == nil, url.fragment == nil,
+                  url.path.isEmpty || url.path == "/"
+            else { throw UsageError.message("Metrics URL must be an HTTP(S) server origin.") }
+        }
         guard let url = URL(string: self.nousURL), ["http", "https"].contains(url.scheme),
               url.host != nil, url.user == nil, url.password == nil, url.query == nil, url.fragment == nil,
               url.path.isEmpty || url.path == "/"

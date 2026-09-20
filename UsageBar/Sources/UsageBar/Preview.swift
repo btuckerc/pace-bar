@@ -35,6 +35,9 @@ enum Preview {
         cpu 100 0 50 850 0 0 0 0
         """)
         store.cpuPercent = 8.4
+        store.configuration.electricityUSDPerKWh = 0.15
+        store.gpuEnergy.record(millijoules: 1000, uptime: 1000)
+        store.gpuEnergy.record(millijoules: 360_001_000, uptime: 4600)
         store.codex[2].snapshot = try UsageParser.codex(Data("""
         {"plan_type":"pro","rate_limit":{"primary_window":{
         "used_percent":100,"reset_at":\(Int(Date().timeIntervalSince1970 + 28800)),"limit_window_seconds":604800}},

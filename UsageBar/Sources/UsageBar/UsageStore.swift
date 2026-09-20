@@ -10,6 +10,7 @@ final class UsageStore {
     var nous: NousSnapshot?
     var host: HostSnapshot?
     var cpuPercent: Double?
+    var gpuEnergy = GPUEnergy()
     var errors: [String: String] = [:]
     var updated: [String: Date] = [:]
     var refreshing: Set<String> = []
@@ -141,6 +142,7 @@ final class UsageStore {
                     let value = try await self.services.host(config)
                     guard generation == self.generation else { return }
                     self.cpuPercent = value.cpu?.usage(since: self.host?.cpu)
+                    self.gpuEnergy.record(millijoules: value.energyMilliJoules, uptime: value.uptime)
                     self.host = value
                 }
                 self.updated[provider] = Date()
@@ -169,6 +171,7 @@ final class UsageStore {
         self.nous = nil
         self.host = nil
         self.cpuPercent = nil
+        self.gpuEnergy = GPUEnergy()
         self.updated = [:]
         self.errors = [:]
         self.attempted = [:]
