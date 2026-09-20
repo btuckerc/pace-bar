@@ -2,6 +2,10 @@
 
 ## 0.62.1 — Unreleased
 
+### Added
+
+- Standalone Usage Bar: show private-by-default 30-day Codex API-equivalent cost, automatically import and retain T3 usage history, reuse T3 pricing overrides and calendar windows, and distinguish estimates from OpenRouter lifetime spend and GPU electricity cost.
+
 ### Fixed
 
 - Codex costs: count only a paginated session's new usage, repairing inflated cached totals while preserving validated historical pricing across appends and interrupted scans (#3753). Thanks @anon5376!

@@ -5,7 +5,6 @@ import UsageBarCore
 struct Dashboard: View {
     @Bindable var store: UsageStore
     let openSettings: () -> Void
-    @State private var isTotalSpendVisible = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -35,7 +34,8 @@ struct Dashboard: View {
                 } label: { Image(systemName: self.store.paused ? "play.fill" : "pause") }
                     .help(self.store.paused ? "Resume" : "Pause")
                     .accessibilityLabel(self.store.paused ? "Resume" : "Pause")
-                Button("Quit") { NSApp.terminate(nil) }
+                Button { NSApp.terminate(nil) } label: { Image(systemName: "power") }
+                    .help("Quit Usage Bar").accessibilityLabel("Quit Usage Bar")
             }
             .buttonStyle(.borderless).font(.caption).foregroundStyle(.secondary)
             .padding(.horizontal, 18).padding(.vertical, 10)
@@ -108,7 +108,47 @@ struct Dashboard: View {
             }
 
             if self.store.codex.isEmpty { Text("—").foregroundStyle(.secondary) }
+            HStack(alignment: .bottom) {
+                PrivateCostMetric(
+                    title: "API equivalent · 30d",
+                    amount: self.store.codexCost?.usd,
+                    explanation: self.codexCostHelp,
+                    estimated: true)
+                Text(self.codexCostCoverage)
+                    .font(.system(size: 10)).foregroundStyle(.secondary)
+                    .multilineTextAlignment(.trailing)
+            }
         }
+    }
+
+    private var codexCostCoverage: String {
+        guard let cost = self.store.codexCost else { return "Local usage\nNot billed spend" }
+        if cost.usd == nil { return "Estimate unavailable\nNot billed spend" }
+        if cost.incomplete || cost.unpricedRecords > 0 { return "Partial estimate\nNot billed spend" }
+        return self.store.codexHistoryImported ? "Includes T3 history\nNot billed spend" : "Local usage\nNot billed spend"
+    }
+
+    private var codexCostHelp: String {
+        var text = "Estimated API price of locally recorded Codex tokens for today and the preceding 29 calendar days, "
+            + "matching T3's 30-day window in this Mac's time zone. Across local Codex homes, not per subscription account. "
+            + "T3's retained local history is imported automatically and preserved independently of its original logs. "
+            + "Not your bill, subscription fee, savings, or a forecast. Other machines are not included unless their "
+            + "usage is present locally; compare T3 with the same environment selection. "
+            + "Input and cache are priced separately; reasoning is already in output. Base rates are not an invoice."
+        if let cost = self.store.codexCost {
+            if cost.unpricedRecords > 0 {
+                text += " \(cost.unpricedRecords) usage records have no known price and are excluded."
+            }
+            if cost
+                .incomplete { text += " History or pricing coverage is incomplete; this is only the known subtotal." }
+            if let date = cost.ratesUpdated {
+                text += " LiteLLM pricing catalog fetched \(date.formatted(date: .abbreviated, time: .omitted))."
+                if Date().timeIntervalSince(date) > 86400 { text += " Cached rates may be out of date." }
+            }
+            if cost.usesT3Pricing { text += " Uses T3's saved pricing catalog and custom price overrides." }
+            if cost.usd == nil { text += " No priceable local usage is available; — does not mean zero cost." }
+        }
+        return text
     }
 
     private func exhaustion(
@@ -195,38 +235,16 @@ struct Dashboard: View {
             HStack(alignment: .top) {
                 self.metric("Balance", self.money(self.store.router?.balance))
                     .help("Account-wide credit balance in USD")
-                self.totalSpend
+                PrivateCostMetric(
+                    title: "Spent · lifetime",
+                    amount: self.store.router?.totalSpent,
+                    explanation: "Actual account-wide OpenRouter credit usage in USD, not a 30-day estimate. "
+                        + "Excludes external BYOK bills.")
             }
             if let cap = self.store.router?.keyRemaining {
                 Text("Cap \(self.money(cap))").font(.caption2).foregroundStyle(.secondary)
                     .help("Remaining spending allowance for this API key")
             }
-        }
-    }
-
-    @ViewBuilder
-    private var totalSpend: some View {
-        if let amount = self.store.router?.totalSpent {
-            VStack(alignment: .leading, spacing: 3) {
-                Text("Total spent").font(.system(size: 11)).foregroundStyle(.secondary)
-                Button { self.isTotalSpendVisible.toggle() } label: {
-                    // Blur a fixed placeholder so hidden digits and their length never reach the view.
-                    Text(self.isTotalSpendVisible ? self.money(amount) : "••••••")
-                        .font(.system(size: 13, weight: .medium)).monospacedDigit()
-                        .blur(radius: self.isTotalSpendVisible ? 0 : 4)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .contentShape(Rectangle())
-                        .accessibilityHidden(true)
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel(self.isTotalSpendVisible ? "Hide total spent" : "Show total spent")
-                .accessibilityValue(self.isTotalSpendVisible ? self.money(amount) : "Hidden")
-                .help(self.isTotalSpendVisible ? "Click to hide total spent" : "Click to reveal total spent")
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .onDisappear { self.isTotalSpendVisible = false }
-        } else {
-            self.metric("Total spent", "—")
         }
     }
 
@@ -259,8 +277,12 @@ struct Dashboard: View {
                     self.metric("Avg W", self.decimal(self.store.gpuEnergy.averageWatts))
                     self.metric("Wh", self.decimal(self.store.gpuEnergy.wattHours))
                     if let rate = self.store.configuration.electricityUSDPerKWh {
-                        self.metric("Est. cost", self.energyCost(self.store.gpuEnergy.cost(rate: rate)))
-                            .help("GPU energy × $\(rate)/kWh. Excludes the rest of the host and PSU losses.")
+                        PrivateCostMetric(
+                            title: "GPU cost",
+                            amount: self.store.gpuEnergy.cost(rate: rate),
+                            explanation: "Estimated GPU energy × $\(rate)/kWh since monitoring began. "
+                                + "Not API-equivalent cost. Excludes the rest of the host and PSU losses.",
+                            estimated: true)
                     }
                 }
                 .help(
@@ -347,12 +369,6 @@ struct Dashboard: View {
         if seconds >= 86400 { return "\(Int(ceil(seconds / 86400)))d" }
         if seconds >= 3600 { return "\(Int(ceil(seconds / 3600)))h" }
         return "\(Int(ceil(seconds / 60)))m"
-    }
-
-    private func energyCost(_ value: Double?) -> String {
-        guard let value else { return "—" }
-        if value > 0, value < 0.01 { return "<1¢" }
-        return self.money(value)
     }
 
     private func money(_ value: Double?) -> String {

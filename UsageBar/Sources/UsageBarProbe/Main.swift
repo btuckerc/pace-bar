@@ -8,6 +8,10 @@ struct Probe {
     static func main() async {
         do {
             let config = try Configuration.load()
+            if CommandLine.arguments.count == 3, CommandLine.arguments[1] == "--import-cost-history" {
+                try await self.importCostHistory(path: CommandLine.arguments[2], configuration: config)
+                return
+            }
             let services = Services()
             if CommandLine.arguments.count == 2, CommandLine.arguments[1] == "--runway" {
                 try await self.showRunway(configuration: config, services: services)
@@ -61,6 +65,58 @@ struct Probe {
             print("Configuration: FAILED")
             exit(1)
         }
+    }
+
+    /// Local usage metadata only: no account probes, credentials, Keychain, or inference calls.
+    private static func importCostHistory(path: String, configuration: Configuration) async throws {
+        let now = Date()
+        let history = CodexCostHistory()
+        var snapshot = await history.records(authFile: configuration.codexAuthFile, now: now)
+        var passes = 1
+        while snapshot.pendingScan, passes < 64 {
+            snapshot = await history.records(authFile: configuration.codexAuthFile, now: now)
+            passes += 1
+        }
+        let pricing = APICostPricing(
+            t3Directory: FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".t3/userdata"))
+        let estimate = await pricing.estimate(records: snapshot.records, incomplete: snapshot.incomplete, now: now)
+        var models: [String: [String: Double]] = [:]
+        for record in snapshot.records {
+            var totals = models[record.model] ?? [:]
+            totals["input", default: 0] += record.tokens.input
+            totals["cachedInput", default: 0] += record.tokens.cachedInput
+            totals["cacheWrite", default: 0] += record.tokens.cacheWrite
+            totals["output", default: 0] += record.tokens.output
+            totals["records", default: 0] += 1
+            models[record.model] = totals
+        }
+        let window = APICostWindow.bounds(now: now)
+        let report: [String: Any] = [
+            "asOf": now.timeIntervalSince1970,
+            "windowStart": window.lowerBound.timeIntervalSince1970,
+            "windowEnd": window.upperBound.timeIntervalSince1970,
+            "retainedRecords": snapshot.retainedRecords,
+            "importedT3": snapshot.importedT3,
+            "incomplete": estimate.incomplete,
+            "pendingScan": snapshot.pendingScan,
+            "pricedRecords": estimate.pricedRecords,
+            "unpricedRecords": estimate.unpricedRecords,
+            "usesT3Pricing": estimate.usesT3Pricing,
+            "usd": estimate.usd as Any? ?? NSNull(),
+            "models": models,
+        ]
+        let file = URL(fileURLWithPath: path)
+        guard !FileManager.default.fileExists(atPath: file.path) else {
+            throw UsageError.message("Refusing to overwrite an existing report.")
+        }
+        try JSONSerialization.data(withJSONObject: report, options: [.sortedKeys]).write(
+            to: file,
+            options: .withoutOverwriting)
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: file.path)
+        print("T3 history imported: \(snapshot.importedT3); retained records: \(snapshot.retainedRecords).")
+        print(
+            "30-day priced records: \(estimate.pricedRecords); unpriced: \(estimate.unpricedRecords); partial: \(estimate.incomplete).")
+        print("Private reconciliation report written. No account probes were run.")
     }
 
     private static func importHistory(path: String, configuration: Configuration, services: Services) async throws {
