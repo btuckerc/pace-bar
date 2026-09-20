@@ -64,6 +64,18 @@ private func json(_ text: String) -> Data { Data(text.utf8) }
     #expect(try UsageParser.loadedModel(json("{\"data\":[{\"id\":\"single\"}]}")) == "single")
 }
 
+@Test func `Inventory reports only deduplicated explicitly unloaded models`() throws {
+    let value = try UsageParser.unloadedModels(json("""
+    {"data":[{"id":"cold","status":{"value":"unloaded"}},
+      {"id":"active","status":{"value":"loaded"}},
+      {"id":"unknown"},{"id":"missing","status":{}},
+      {"id":"cold","status":{"value":"unloaded"}}]}
+    """))
+    #expect(value == ["cold"])
+    #expect(try UsageParser.unloadedModels(json("{\"data\":[]}")) == [])
+    #expect(throws: (any Error).self) { try UsageParser.unloadedModels(json("{}")) }
+}
+
 @Test func `Nous keeps prompt cache and generation counters separate`() throws {
     let value = try UsageParser.nous(json("""
     # HELP llamacpp:prompt_tokens_total Prompt tokens

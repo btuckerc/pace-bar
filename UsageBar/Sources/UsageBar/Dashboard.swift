@@ -237,13 +237,13 @@ struct Dashboard: View {
                 Text(model).font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1).help(model)
             }
             HStack {
-                self.metric("Output", self.number(self.store.nous?.outputTokens))
-                self.metric("Input", self.number(self.store.nous?.promptTokens))
-                self.metric("Cache", self.number(self.store.nous?.cachedTokens))
+                self.metric("Output", self.number(self.store.nousLifetime?.outputTokens))
+                self.metric("Input", self.number(self.store.nousLifetime?.promptTokens))
+                self.metric("Cache", self.number(self.store.nousLifetime?.cachedTokens))
                 self.metric("t/s", self.decimal(self.store.nous?.generationTPS))
             }
             .help(
-                "Token counters since model load. Input excludes cached tokens. "
+                "Persistent observed lifetime totals across models and app restarts. Input excludes cached tokens. "
                     + "t/s is llama-server's generation-rate gauge, not time to first token.")
             if let nous = self.store.nous, (nous.processing ?? 0) + (nous.queued ?? 0) > 0 {
                 Text("\(self.number(nous.processing)) active · \(self.number(nous.queued)) queued")
@@ -310,7 +310,9 @@ struct Dashboard: View {
 
     @ViewBuilder
     private func status(_ provider: String) -> some View {
-        let error = self.store.errors[provider] ?? (provider == "OpenRouter" ? self.store.router?.warning : nil)
+        let error = self.store.errors[provider]
+            ?? (provider == "Nous" ? self.store.errors["Nous history"] : nil)
+            ?? (provider == "OpenRouter" ? self.store.router?.warning : nil)
         let date = self.store.updated[provider]
         let stale = date.map { Date().timeIntervalSince($0) > (self.store.constrained ? 1800 : 600) } ?? false
         if error != nil || stale {

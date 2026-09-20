@@ -20,7 +20,7 @@ Balance and total spent come from the account credits endpoint. They cover OpenR
 
 ## Local inference
 
-Set **Nous URL** to your llama-server origin, such as `http://inference-host:8080`. The section is currently named “nous,” after the original host; the address is configurable. Enable llama-server's metrics endpoint (`--metrics`). The app reads `/v1/models` and `/metrics`; it does not generate tokens or load models.
+Set **Nous URL** to your llama-server origin, such as `http://inference-host:8080`. The section is currently named “nous,” after the original host; the address is configurable. Enable llama-server's metrics endpoint (`--metrics`). The app reads `/v1/models` and `/metrics`; it does not generate tokens or load models. Output, input, and cache totals are collected for observed model counters, scoped to the Nous URL, and retained across app restarts in `~/.local/share/usage-bar/nous-history.json`. Totals start with the currently available process counters, preserve known resets, and cannot recover prior ended-process usage, models loaded and unloaded between polls, or resets that were not observed.
 
 For CPU, GPU, memory, and power readings, choose either:
 

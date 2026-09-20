@@ -28,6 +28,8 @@ enum Preview {
         llamacpp:prompt_tokens_cached_total 479407
         llamacpp:predicted_tokens_seconds 42.5
         """.utf8), model: "Example-9B-Q5_K_M")
+        store.nousLifetime = NousLifetimeTotals(
+            promptTokens: 116_790, cachedTokens: 479_407, outputTokens: 31978)
         store.host = try UsageParser.host("""
         GPU 12, 6246, 10240, 27.2
                       total used free shared buff/cache available

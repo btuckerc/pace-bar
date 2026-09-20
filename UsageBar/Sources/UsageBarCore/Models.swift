@@ -52,10 +52,34 @@ public struct NousSnapshot: Sendable {
     public let promptTPS: Double?
     public let processing: Double?
     public let queued: Double?
+    public let unloadedModels: [String]
+
+    public init(
+        model: String?, promptTokens: Double?, cachedTokens: Double?, outputTokens: Double?,
+        generationTPS: Double?, promptTPS: Double?, processing: Double?, queued: Double?,
+        unloadedModels: [String] = [])
+    {
+        self.model = model
+        self.promptTokens = promptTokens
+        self.cachedTokens = cachedTokens
+        self.outputTokens = outputTokens
+        self.generationTPS = generationTPS
+        self.promptTPS = promptTPS
+        self.processing = processing
+        self.queued = queued
+        self.unloadedModels = unloadedModels
+    }
 
     public static let idle = NousSnapshot(
         model: nil, promptTokens: nil, cachedTokens: nil, outputTokens: nil,
-        generationTPS: nil, promptTPS: nil, processing: nil, queued: nil)
+        generationTPS: nil, promptTPS: nil, processing: nil, queued: nil, unloadedModels: [])
+
+    public func withUnloadedModels(_ models: [String]) -> NousSnapshot {
+        NousSnapshot(
+            model: self.model, promptTokens: self.promptTokens, cachedTokens: self.cachedTokens,
+            outputTokens: self.outputTokens, generationTPS: self.generationTPS, promptTPS: self.promptTPS,
+            processing: self.processing, queued: self.queued, unloadedModels: models)
+    }
 }
 
 public struct HostSnapshot: Sendable {
@@ -193,6 +217,23 @@ public enum UsageParser {
         return nil
     }
 
+    public static func unloadedModels(_ data: Data) throws -> [String] {
+        let root = try self.object(data)
+        guard let models = root["data"] as? [[String: Any]] else {
+            throw UsageError.message("Invalid model inventory.")
+        }
+        var result: [String] = []
+        var seen = Set<String>()
+        // `created` is inventory metadata, not a model load epoch; status is the lifecycle signal.
+        for model in models {
+            guard (model["status"] as? [String: Any])?["value"] as? String == "unloaded",
+                  let id = model["id"] as? String, !id.isEmpty, seen.insert(id).inserted
+            else { continue }
+            result.append(id)
+        }
+        return result
+    }
+
     public static func nous(_ data: Data, model: String) throws -> NousSnapshot {
         guard data.count <= 65536, let text = String(data: data, encoding: .utf8) else {
             throw UsageError.oversized
@@ -216,7 +257,7 @@ public enum UsageParser {
             generationTPS: metrics["llamacpp:predicted_tokens_seconds"],
             promptTPS: metrics["llamacpp:prompt_tokens_seconds"],
             processing: metrics["llamacpp:requests_processing"],
-            queued: metrics["llamacpp:requests_deferred"])
+            queued: metrics["llamacpp:requests_deferred"], unloadedModels: [])
     }
 
     public static func host(_ text: String) throws -> HostSnapshot {

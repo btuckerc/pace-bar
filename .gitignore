@@ -65,6 +65,7 @@ secrets/
 .config/usage-bar/
 .local/share/usage-bar/
 quota-history.json
+nous-history.json
 quota-backfill*.json
 *.sqlite
 *.sqlite3

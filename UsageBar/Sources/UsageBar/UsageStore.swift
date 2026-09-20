@@ -8,6 +8,7 @@ final class UsageStore {
     var codex: [CodexReading] = []
     var router: OpenRouterSnapshot?
     var nous: NousSnapshot?
+    var nousLifetime: NousLifetimeTotals?
     var host: HostSnapshot?
     var cpuPercent: Double?
     var gpuEnergy = GPUEnergy()
@@ -21,6 +22,7 @@ final class UsageStore {
     @ObservationIgnored var iconNeedsUpdate: (() -> Void)?
     @ObservationIgnored private let services = Services()
     @ObservationIgnored private let quotaHistory = QuotaHistoryStore()
+    @ObservationIgnored private let nousHistory = NousHistoryStore()
     @ObservationIgnored private var timer: Timer?
     @ObservationIgnored private var tasks: [String: Task<Void, Never>] = [:]
     @ObservationIgnored private var generation = 0
@@ -154,8 +156,17 @@ final class UsageStore {
                     guard generation == self.generation else { return }
                     self.router = value
                 case "Nous":
+                    let origin = config.nousURL
+                    let (storedTotals, stored) = await self.nousHistory.snapshot(origin: origin)
+                    guard generation == self.generation, !Task.isCancelled else { return }
+                    self.nousLifetime = storedTotals
+                    self.errors["Nous history"] = stored ? nil : "Nous history could not be loaded; lifetime totals may be unavailable."
                     let value = try await self.services.nous(config)
-                    guard generation == self.generation else { return }
+                    guard generation == self.generation, !Task.isCancelled else { return }
+                    let (totals, saved) = await self.nousHistory.record(value, origin: origin)
+                    guard generation == self.generation, !Task.isCancelled else { return }
+                    self.nousLifetime = totals
+                    self.errors["Nous history"] = saved ? nil : "Could not save Nous history; totals may be lost after quitting."
                     self.nous = value
                 default:
                     let value = try await self.services.host(config)
@@ -188,6 +199,7 @@ final class UsageStore {
         self.codex = []
         self.router = nil
         self.nous = nil
+        self.nousLifetime = nil
         self.host = nil
         self.cpuPercent = nil
         self.gpuEnergy = GPUEnergy()

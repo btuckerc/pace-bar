@@ -77,11 +77,17 @@ public actor Services {
         try configuration.validate()
         let origin = URL(string: configuration.nousURL)!
         let models = try await self.get(origin.appendingPathComponent("v1/models"))
-        guard let model = try UsageParser.loadedModel(models) else { return .idle }
+        let unloadedModels = try UsageParser.unloadedModels(models)
+        guard let model = try UsageParser.loadedModel(models) else {
+            return NousSnapshot(
+                model: nil, promptTokens: nil, cachedTokens: nil, outputTokens: nil,
+                generationTPS: nil, promptTPS: nil, processing: nil, queued: nil,
+                unloadedModels: unloadedModels)
+        }
         var components = URLComponents(url: origin.appendingPathComponent("metrics"), resolvingAgainstBaseURL: false)!
         components.queryItems = [URLQueryItem(name: "model", value: model)]
         let data = try await self.get(components.url!, limit: 65536)
-        return try UsageParser.nous(data, model: model)
+        return try UsageParser.nous(data, model: model).withUnloadedModels(unloadedModels)
     }
 
     public func host(_ configuration: Configuration) async throws -> HostSnapshot {
