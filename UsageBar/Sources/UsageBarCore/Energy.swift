@@ -1,8 +1,7 @@
 import Foundation
 
-/// Hardware counter deltas, not integration of sparse instantaneous power samples.
+/// Driver-lifetime energy, with recent average power from hardware counter deltas.
 public struct GPUEnergy: Sendable {
-    private var baseline: (millijoules: Double, uptime: Double)?
     private var previous: (millijoules: Double, uptime: Double)?
     public private(set) var wattHours: Double?
     public private(set) var averageWatts: Double?
@@ -10,25 +9,21 @@ public struct GPUEnergy: Sendable {
     public init() {}
 
     public mutating func record(millijoules: Double?, uptime: Double?) {
-        guard let millijoules, let uptime, millijoules.isFinite, uptime.isFinite,
-              millijoules >= 0, uptime >= 0
-        else {
+        self.averageWatts = nil
+        guard let millijoules, millijoules.isFinite, millijoules >= 0 else {
             self.wattHours = nil
-            self.averageWatts = nil
             return
         }
-        if self.baseline == nil || millijoules < (self.previous?.millijoules ?? 0)
-            || uptime < (self.previous?.uptime ?? 0)
-        {
-            self.baseline = (millijoules, uptime)
-            self.wattHours = nil
-            self.averageWatts = nil
+        // The hardware owns this total; restarting the app must not subtract a new baseline.
+        self.wattHours = millijoules / 3_600_000
+        guard let uptime, uptime.isFinite, uptime >= 0 else {
+            self.previous = nil
+            return
         }
-        self.previous = (millijoules, uptime)
-        guard let baseline = self.baseline, uptime > baseline.uptime else { return }
-        let joules = (millijoules - baseline.millijoules) / 1000
-        self.wattHours = joules / 3600
-        self.averageWatts = joules / (uptime - baseline.uptime)
+        defer { self.previous = (millijoules, uptime) }
+        guard let previous = self.previous,
+              millijoules >= previous.millijoules, uptime > previous.uptime else { return }
+        self.averageWatts = (millijoules - previous.millijoules) / 1000 / (uptime - previous.uptime)
     }
 
     public func cost(rate: Double?) -> Double? {

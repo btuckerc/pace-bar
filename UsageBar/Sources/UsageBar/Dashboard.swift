@@ -267,18 +267,18 @@ struct Dashboard: View {
                 HStack(alignment: .top) {
                     self.metric("GPU W", self.decimal(self.store.host?.watts)).help("Current GPU board power draw")
                     self.metric("Avg W", self.decimal(self.store.gpuEnergy.averageWatts))
+                        .help(
+                            "Average GPU power between the latest valid hardware readings. Available after two polls.")
                     self.metric("Wh", self.decimal(self.store.gpuEnergy.wattHours))
+                        .help("NVIDIA's cumulative GPU energy since the driver last reloaded. Survives app restarts.")
                     if let rate = self.store.configuration.electricityUSDPerKWh {
                         PrivateCostMetric(
                             title: "GPU cost",
                             amount: self.store.gpuEnergy.cost(rate: rate),
-                            explanation: "Estimated GPU energy × $\(rate)/kWh since monitoring began. "
+                            explanation: "GPU energy since the driver last reloaded × $\(rate)/kWh. "
                                 + "Not API-equivalent cost. Excludes the rest of the host and PSU losses.")
                     }
                 }
-                .help(
-                    "GPU-only average power and energy since monitoring began. "
-                        + "Resets when Usage Bar restarts or a counter reset is detected.")
                 HStack {
                     Text("VRAM \(self.memory(self.store.host?.vramUsedMiB, self.store.host?.vramTotalMiB))")
                     Spacer()

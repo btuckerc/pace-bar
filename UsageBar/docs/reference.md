@@ -26,7 +26,7 @@ Cloud polls every five minutes (up to four Codex requests plus one OpenRouter re
 
 A local release sample on September 19, 2026, before token-cost history was added, measured a 728 KB app bundle and 13.3 MB physical footprint (13.8 MB peak), with 0.0% CPU in an idle `ps` sample. This is an earlier brief measurement, not a current resource or battery-life benchmark.
 
-`electricityUSDPerKWh` is an optional numeric setting. GPU Wh and average watts use hardware counter deltas since monitoring began, not integration of sparse instantaneous readings. Energy starts after two samples and resets with app/configuration reload or detected hardware counter reset. The rate has no location metadata and is not committed.
+`electricityUSDPerKWh` is an optional numeric setting. GPU Wh reads [NVIDIA's cumulative energy counter](https://docs.nvidia.com/datacenter/dcgm/latest/dcgm-api/dcgm-api-field-ids.html) directly; GPU cost is that total × the configured rate. Both are available on the first successful poll and survive app restarts/reinstalls without local energy storage, additional host requests, or a monitoring service. They cover the current driver lifetime, not a billing month, and reset when the driver counter resets. Avg W uses the energy delta between the latest two valid readings and becomes available after two polls; it is not a lifetime average. Host uptime is not substituted for driver lifetime. GPU-only readings exclude the rest of the machine and PSU losses. The rate has no location metadata and is not committed.
 
 Nonsecret settings live in `~/.config/usage-bar/config.json`, created only when saved. Quota history and Nous lifetime totals are small local JSON files. There is no telemetry, cookie scraping, credential-refresh service, or updater.
 

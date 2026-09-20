@@ -218,27 +218,37 @@ private func json(_ text: String) -> Data { Data(text.utf8) }
     #expect(value.windows.map(\.compactLabel) == ["5h", "7d"])
 }
 
-@Test func `Hardware energy deltas convert to Wh average watts and cost`() {
+@Test func `Hardware energy survives app restart while average power uses the latest interval`() {
     var energy = GPUEnergy()
-    energy.record(millijoules: 1000, uptime: 100)
-    #expect(energy.wattHours == nil)
-    energy.record(millijoules: 3_601_000, uptime: 160)
+    energy.record(millijoules: 3_600_000, uptime: 100)
     #expect(energy.wattHours == 1)
+    #expect(energy.averageWatts == nil)
+    energy.record(millijoules: 7_200_000, uptime: 160)
+    #expect(energy.wattHours == 2)
     #expect(energy.averageWatts == 60)
-    #expect(energy.cost(rate: 0.15) == 0.00015)
+    #expect(energy.cost(rate: 0.15) == 0.0003)
     #expect(energy.cost(rate: nil) == nil)
+    energy.record(millijoules: 9_000_000, uptime: 220)
+    #expect(energy.averageWatts == 30)
+    var restarted = GPUEnergy()
+    restarted.record(millijoules: 9_000_000, uptime: 220)
+    #expect(restarted.wattHours == energy.wattHours)
+    #expect(restarted.cost(rate: 0.15) == energy.cost(rate: 0.15))
+    #expect(restarted.averageWatts == nil)
 }
 
-@Test func `Energy resets do not create negative or borrowed consumption`() {
+@Test func `Driver and host resets replace totals without negative or borrowed averages`() {
     var energy = GPUEnergy()
-    energy.record(millijoules: 1000, uptime: 100)
-    energy.record(millijoules: 3_601_000, uptime: 160)
-    energy.record(millijoules: 10, uptime: 180)
-    #expect(energy.wattHours == nil)
-    energy.record(millijoules: 3_600_010, uptime: 240)
+    energy.record(millijoules: 7_200_000, uptime: 160)
+    energy.record(millijoules: 0, uptime: 180)
+    #expect(energy.wattHours == 0)
+    #expect(energy.averageWatts == nil)
+    energy.record(millijoules: 3_600_000, uptime: 240)
     #expect(energy.wattHours == 1)
-    energy.record(millijoules: 7_200_010, uptime: 10)
-    #expect(energy.wattHours == nil)
+    #expect(energy.averageWatts == 60)
+    energy.record(millijoules: 7_200_000, uptime: 10)
+    #expect(energy.wattHours == 2)
+    #expect(energy.averageWatts == nil)
 }
 
 @Test func `Missing energy does not turn into zero and long gaps use counter deltas`() {
