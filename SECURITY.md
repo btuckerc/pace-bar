@@ -8,4 +8,4 @@ Usage Bar reads existing provider credential files and makes authenticated reque
 
 The optional host API has no application-level authentication. Keep its listener on loopback and expose it only through a private network with appropriate access controls; see the [host setup](UsageBar/host/README.md).
 
-This fork retains CodexBar history, including synthetic test tokens and publicly distributed client identifiers/configuration. These are not Usage Bar account credentials. Reviewed scanner findings are identified by exact commit/path fingerprints in `.gitleaksignore`; new findings still fail CI.
+This fork retains CodexBar history, including synthetic test tokens and publicly distributed client identifiers/configuration. These are not Usage Bar account credentials. Reviewed scanner findings are identified by exact commit/path fingerprints in `.gitleaksignore`; review new findings before committing.

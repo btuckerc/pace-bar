@@ -32,7 +32,7 @@ Nonsecret settings live in `~/.config/usage-bar/config.json`, created only when 
 
 `make test` uses synthetic data and temporary files only. Account tests cover four distinct identities, duplicate sign-ins, most-recent credential selection, and malformed credentials. Parser tests cover quota windows, optional endpoint failures, separate billing scopes, model selection, and host counters.
 
-`swift run UsageBarProbe` explicitly performs live read-only validation and prints only capability counts, not tokens, emails, account IDs, or raw bodies. `swift run UsageBar --render-preview /tmp/usage-bar.png` renders a synthetic panel without network requests. The standalone package has its own CI workflow; root CodexBar tests remain upstream's separate suite.
+`swift run UsageBarProbe` explicitly performs live read-only validation and prints only capability counts, not tokens, emails, account IDs, or raw bodies. `swift run UsageBar --render-preview /tmp/usage-bar.png` renders a synthetic panel without network requests. Root CodexBar tests remain upstream's separate suite.
 
 ## Codex runway forecast
 

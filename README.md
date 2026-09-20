@@ -6,7 +6,7 @@ Codex, local inference, and OpenRouter in one quiet macOS menu bar.
   <img src="UsageBar/docs/images/usage-bar.png" width="390" alt="Usage Bar showing four named Codex accounts with quota meters and estimated depletion dates, local inference and GPU metrics, and OpenRouter credit balance. All values are sample data.">
 </picture>
 
-**[Setup](UsageBar/docs/setup.md)** · **[How it works](UsageBar/docs/reference.md)** · **[Contributing](CONTRIBUTING.md)**
+**[Download source](https://github.com/btuckerc/usage-bar/archive/refs/heads/main.zip)** · **[Setup](UsageBar/docs/setup.md)** · **[How it works](UsageBar/docs/reference.md)** · **[Contributing](CONTRIBUTING.md)**
 
 - **Codex:** separate account quotas, reset credits, and a shared usage runway.
 - **Local inference:** llama-server token counts and speed, plus optional GPU, memory, and energy readings.

@@ -12,7 +12,7 @@ From the repository root, with Xcode 26.2 or later selected and Python 3 availab
 make -C UsageBar test check package
 ```
 
-Tests use synthetic data and temporary files. `check` downloads the pinned formatting/lint tools used by this repository. Do not run live provider probes as part of tests or CI.
+Tests use synthetic data and temporary files. `check` downloads the pinned formatting/lint tools used by this repository. Do not run live provider probes as part of tests.
 
 For a UI change, render a preview without accessing accounts:
 
@@ -24,7 +24,7 @@ Describe the behavior changed and how you checked it. Include a synthetic previe
 
 ## Secret scanning
 
-GitHub secret scanning and push protection are enabled. The Secrets workflow also scans Git history with Gitleaks. `.gitleaksignore` lists exact, reviewed findings inherited from CodexBar; it does not exclude directories or future commits.
+GitHub secret scanning and push protection are enabled. `.gitleaksignore` lists exact, reviewed findings inherited from CodexBar; it does not exclude directories or future commits.
 
 To repeat the history scan with Gitleaks 8.30.1 installed:
 
