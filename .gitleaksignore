@@ -2,6 +2,9 @@
 # Public client configuration, synthetic fixtures, hashes, and noncredential text.
 # No whole-file, directory, or future-commit exclusions. See SECURITY.md.
 
+# Inherited upstream Quotio native OAuth client configuration (public app config).
+1d3657317eb29ff811dc4d476a84e411ac14bddb:Quotio/Services/AntigravityQuotaFetcher.swift:generic-api-key:150
+
 # .mac-release.env
 26dad692ee2b9ca12c83c344779c9640afd857d0:.mac-release.env:generic-api-key:7
 
