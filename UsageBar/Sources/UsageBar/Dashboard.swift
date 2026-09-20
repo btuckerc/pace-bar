@@ -8,16 +8,14 @@ struct Dashboard: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
-                    self.codexSection
-                    Divider()
-                    self.routerSection
-                    Divider()
-                    self.nousSection
-                }
-                .padding(18)
+            VStack(alignment: .leading, spacing: 16) {
+                self.codexSection
+                Divider().opacity(0.6)
+                self.routerSection
+                Divider().opacity(0.6)
+                self.nousSection
             }
+            .padding(18)
             Divider()
             HStack(spacing: 16) {
                 Button(action: self.openSettings) { Image(systemName: "gearshape") }
@@ -41,7 +39,8 @@ struct Dashboard: View {
             .buttonStyle(.borderless).font(.caption).foregroundStyle(.secondary)
             .padding(.horizontal, 18).padding(.vertical, 10)
         }
-        .frame(width: 390, height: 480)
+        .frame(width: 390)
+        .fixedSize(horizontal: false, vertical: true)
     }
 
     private var codexSection: some View {
@@ -66,13 +65,13 @@ struct Dashboard: View {
                             ForEach(snapshot.windows) { window in
                                 VStack(spacing: 5) {
                                     HStack(spacing: 4) {
-                                        Text(window.label == "Weekly" ? "Week" : window.label)
+                                        Text(window.compactLabel).lineLimit(1)
                                             .foregroundStyle(.secondary)
                                         Spacer(minLength: 0)
-                                        Text("\(window.remainingPercent, specifier: "%.0f")%")
-                                        Text(self.reset(window.resetsAt)).foregroundStyle(.secondary)
+                                        Text("\(window.remainingPercent, specifier: "%.0f")%").fixedSize()
+                                        Text(self.reset(window.resetsAt)).foregroundStyle(.secondary).fixedSize()
                                     }
-                                    .font(.system(size: 10)).monospacedDigit()
+                                    .font(.system(size: 11)).monospacedDigit()
                                     self.rail(window.remainingPercent, stale: stale)
                                 }
                                 .help(
@@ -117,7 +116,7 @@ struct Dashboard: View {
         VStack(alignment: .leading, spacing: 10) {
             self.heading("nous", provider: "Nous", detail: self.store.nous?.model == nil ? "Idle" : nil)
             if let model = self.store.nous?.model {
-                Text(model).font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1).help(model)
+                Text(model).font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1).help(model)
             }
             HStack {
                 self.metric("Output", self.number(self.store.nous?.outputTokens))
@@ -148,7 +147,7 @@ struct Dashboard: View {
                     Text("RAM \(self.memory(self.store.host?.ramUsedMiB, self.store.host?.ramTotalMiB))")
                     self.status("Host")
                 }
-                .font(.system(size: 10)).foregroundStyle(.secondary).monospacedDigit()
+                .font(.system(size: 11)).foregroundStyle(.secondary).monospacedDigit()
             }
         }
     }
@@ -159,7 +158,7 @@ struct Dashboard: View {
                 Text(label).foregroundStyle(.secondary)
                 Spacer(minLength: 3)
                 Text(value.map { "\(self.number($0))%" } ?? "—")
-            }.font(.system(size: 10)).monospacedDigit()
+            }.font(.system(size: 11)).monospacedDigit()
             self.rail(value ?? 0, stale: self.store.errors["Host"] != nil)
         }
         .help("\(label) utilization. CPU is averaged between host samples.")
@@ -180,7 +179,7 @@ struct Dashboard: View {
             Text(title).font(.system(size: 13, weight: .semibold))
             self.status(provider)
             Spacer()
-            if let detail { Text(detail).font(.system(size: 10)).foregroundStyle(.tertiary) }
+            if let detail { Text(detail).font(.system(size: 11)).foregroundStyle(.secondary) }
         }
     }
 
@@ -207,8 +206,8 @@ struct Dashboard: View {
 
     private func metric(_ name: String, _ value: String) -> some View {
         VStack(alignment: .leading, spacing: 3) {
-            Text(name).font(.system(size: 10)).foregroundStyle(.secondary)
-            Text(value).font(.system(size: 12, weight: .medium)).monospacedDigit()
+            Text(name).font(.system(size: 11)).foregroundStyle(.secondary)
+            Text(value).font(.system(size: 13, weight: .medium)).monospacedDigit()
         }
     }
 

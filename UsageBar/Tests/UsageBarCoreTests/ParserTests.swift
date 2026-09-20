@@ -195,3 +195,15 @@ private func json(_ text: String) -> Data { Data(text.utf8) }
     #expect(accounts.map(\.id) == ["main", "second", "last", "btc"])
     #expect(!accounts.contains { $0.label.contains("@") })
 }
+
+@Test func `Compact quota titles preserve durations and reserve identity`() throws {
+    let value = try UsageParser.codex(json("""
+    {"rate_limit":{"primary_window":{"used_percent":3,"reset_at":1800000000,"limit_window_seconds":18000},
+    "secondary_window":{"used_percent":4,"reset_at":1800000000,"limit_window_seconds":604800}},
+    "additional_rate_limits":[{"limit_name":"gpt-reserve","rate_limit":{"primary_window":{
+    "used_percent":0,"reset_at":1800000000,"limit_window_seconds":604800}}}]}
+    """))
+    #expect(value.windows.map(\.compactLabel) == ["5h", "7d", "Reserve · 7d"])
+    #expect(value.windows[2].label == "gpt-reserve · Weekly")
+    #expect(value.windows[2].remainingPercent == 100)
+}

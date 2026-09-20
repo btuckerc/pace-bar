@@ -28,9 +28,22 @@ enum Preview {
         llamacpp:prompt_tokens_cached_total 479407
         llamacpp:predicted_tokens_seconds 42.5
         """.utf8), model: "Example-9B-Q5_K_M")
+        store.host = try UsageParser.host("""
+        GPU 12, 6246, 10240, 27.2
+                      total used free shared buff/cache available
+        Mem:          31027 8499 12000 10 10528 22000
+        cpu 100 0 50 850 0 0 0 0
+        """)
+        store.cpuPercent = 8.4
+        store.codex[2].snapshot = try UsageParser.codex(Data("""
+        {"plan_type":"pro","rate_limit":{"primary_window":{
+        "used_percent":100,"reset_at":\(Int(Date().timeIntervalSince1970 + 28800)),"limit_window_seconds":604800}},
+        "additional_rate_limits":[{"limit_name":"gpt-reserve","rate_limit":{"primary_window":{
+        "used_percent":0,"reset_at":\(Int(Date().timeIntervalSince1970 + 604_800)),"limit_window_seconds":604800}}}]}
+        """.utf8))
         let view = Dashboard(store: store, openSettings: {}).background(Color(nsColor: .windowBackgroundColor))
         let hosting = NSHostingView(rootView: view)
-        hosting.frame = NSRect(x: 0, y: 0, width: 390, height: 480)
+        hosting.frame = NSRect(origin: .zero, size: hosting.fittingSize)
         hosting.layoutSubtreeIfNeeded()
         guard let bitmap = hosting.bitmapImageRepForCachingDisplay(in: hosting.bounds)
         else { throw UsageError.message("Preview rendering failed") }

@@ -12,7 +12,7 @@ Requires macOS 14+, Swift 6.2 / Xcode. Local packaging uses ad-hoc signing; this
 
 ## Interface
 
-One row per Codex identity, with independent remaining-quota meters, percentages, and compact reset intervals. The server determines available windows; a missing five-hour window is not invented. Exact resets, freshness, and error details are available on hover. Failed or stale account readings are dimmed and marked; errors never become zero usage. OpenRouter's account balance is separate from API-key spend. Nous shows model, token counters, generation rate, GPU/CPU meters, power, and memory. Queue counts appear only when nonzero.
+The popover fits its contents without scrolling or a fixed height. One row per Codex identity, with independent remaining-quota meters, percentages, and compact reset intervals. The server determines available windows; a missing five-hour window is not invented. Exact resets, freshness, and error details are available on hover. Failed or stale account readings are dimmed and marked; errors never become zero usage. OpenRouter's account balance is separate from API-key spend. Nous shows model, token counters, generation rate, GPU/CPU meters, power, and memory. Queue counts appear only when nonzero.
 
 The menu glyph is a four-part aperture drawn natively at 18 points, using template coloring for system appearance. It is static. There are no animated charts, browser views, inference probes, or frame-rate timers.
 

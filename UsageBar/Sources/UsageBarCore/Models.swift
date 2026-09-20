@@ -3,7 +3,23 @@ import Foundation
 public struct QuotaWindow: Identifiable, Sendable, Equatable {
     public let id: String
     public let label: String
+    public let periodSeconds: TimeInterval
+    public let lane: String?
     public let usedPercent: Double
+
+    public var compactLabel: String {
+        let period = if self.periodSeconds.truncatingRemainder(dividingBy: 86400) == 0 {
+            "\(Int(self.periodSeconds / 86400))d"
+        } else if self.periodSeconds.truncatingRemainder(dividingBy: 3600) == 0 {
+            "\(Int(self.periodSeconds / 3600))h"
+        } else {
+            "\(Int(ceil(self.periodSeconds / 60)))m"
+        }
+        guard let lane = self.lane else { return period }
+        let name = lane == "gpt-reserve" ? "Reserve" : lane
+        return "\(name) · \(period)"
+    }
+
     public let resetsAt: Date
 
     public var remainingPercent: Double {
@@ -128,6 +144,7 @@ public enum UsageParser {
             }
             return QuotaWindow(
                 id: "\(prefix)-\(key)", label: prefix == "Codex" ? period : "\(prefix) · \(period)",
+                periodSeconds: min(seconds, 3_600_000_000), lane: prefix == "Codex" ? nil : prefix,
                 usedPercent: used, resetsAt: Date(timeIntervalSince1970: reset))
         }
     }
