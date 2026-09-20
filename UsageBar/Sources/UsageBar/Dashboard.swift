@@ -5,6 +5,7 @@ import UsageBarCore
 struct Dashboard: View {
     @Bindable var store: UsageStore
     let openSettings: () -> Void
+    @State private var isTotalSpendVisible = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -194,13 +195,38 @@ struct Dashboard: View {
             HStack(alignment: .top) {
                 self.metric("Balance", self.money(self.store.router?.balance))
                     .help("Account-wide credit balance in USD")
-                self.metric("Total spent", self.money(self.store.router?.totalSpent))
-                    .help("Account-wide lifetime credit usage. Includes all keys; excludes third-party BYOK bills.")
+                self.totalSpend
             }
             if let cap = self.store.router?.keyRemaining {
                 Text("Cap \(self.money(cap))").font(.caption2).foregroundStyle(.secondary)
                     .help("Remaining spending allowance for this API key")
             }
+        }
+    }
+
+    @ViewBuilder
+    private var totalSpend: some View {
+        if let amount = self.store.router?.totalSpent {
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Total spent").font(.system(size: 11)).foregroundStyle(.secondary)
+                Button { self.isTotalSpendVisible.toggle() } label: {
+                    // Blur a fixed placeholder so hidden digits and their length never reach the view.
+                    Text(self.isTotalSpendVisible ? self.money(amount) : "••••••")
+                        .font(.system(size: 13, weight: .medium)).monospacedDigit()
+                        .blur(radius: self.isTotalSpendVisible ? 0 : 4)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(Rectangle())
+                        .accessibilityHidden(true)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(self.isTotalSpendVisible ? "Hide total spent" : "Show total spent")
+                .accessibilityValue(self.isTotalSpendVisible ? self.money(amount) : "Hidden")
+                .help(self.isTotalSpendVisible ? "Click to hide total spent" : "Click to reveal total spent")
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .onDisappear { self.isTotalSpendVisible = false }
+        } else {
+            self.metric("Total spent", "—")
         }
     }
 

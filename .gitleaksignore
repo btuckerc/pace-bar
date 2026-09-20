@@ -1,0 +1,88 @@
+# Exact inherited findings reviewed for the initial Usage Bar publication audit.
+# Public client configuration, synthetic fixtures, hashes, and noncredential text.
+# No whole-file, directory, or future-commit exclusions. See SECURITY.md.
+
+# .mac-release.env
+26dad692ee2b9ca12c83c344779c9640afd857d0:.mac-release.env:generic-api-key:7
+
+# Sources/CodexBar/Resources/de.lproj/Localizable.strings
+5ac203020d38ac350995405c983ad66d1c1aa739:Sources/CodexBar/Resources/de.lproj/Localizable.strings:generic-api-key:828
+
+# Sources/CodexBarCLI/CLIServeProviderIcons.swift
+3a9a86c0cf003e71f23ba93e2943faa424c2b04e:Sources/CodexBarCLI/CLIServeProviderIcons.swift:generic-api-key:58
+
+# Sources/CodexBarCore/Providers/Antigravity/AntigravityOAuth/AntigravityOAuthCredentials.swift
+2dbbed6f2e45e9402e72ff91070d6884a3bace15:Sources/CodexBarCore/Providers/Antigravity/AntigravityOAuth/AntigravityOAuthCredentials.swift:generic-api-key:51
+
+# Sources/CodexBarCore/Providers/Claude/ClaudeOAuth/ClaudeOAuthCredentials.swift
+968e52e03e95591de7d1d91097395bd8a0ca6e3c:Sources/CodexBarCore/Providers/Claude/ClaudeOAuth/ClaudeOAuthCredentials.swift:generic-api-key:125
+
+# Sources/CodexBarCore/Providers/Windsurf/WindsurfWebFetcher.swift
+c52f00efcde1b3e989cb36b2786f48998b1cb867:Sources/CodexBarCore/Providers/Windsurf/WindsurfWebFetcher.swift:gcp-api-key:134
+
+# Sources/CodexBarCore/Vendored/CostUsage/CostUsageScanner+Claude.swift
+6838b44961169c838022879c46a4eb22d52f1771:Sources/CodexBarCore/Vendored/CostUsage/CostUsageScanner+Claude.swift:generic-api-key:212
+e4f1e4c7403504e9183f046ed6e60eeb278bea9a:Sources/CodexBarCore/Vendored/CostUsage/CostUsageScanner+Claude.swift:generic-api-key:212
+fc095497409f66d638872221ace742a39e84e9fa:Sources/CodexBarCore/Vendored/CostUsage/CostUsageScanner+Claude.swift:generic-api-key:212
+
+# Tests/CodexBarTests/CLIConfigCommandTests.swift
+e82810246599de49e4bff03746e92858c7fd8516:Tests/CodexBarTests/CLIConfigCommandTests.swift:generic-api-key:209
+e82810246599de49e4bff03746e92858c7fd8516:Tests/CodexBarTests/CLIConfigCommandTests.swift:generic-api-key:237
+e82810246599de49e4bff03746e92858c7fd8516:Tests/CodexBarTests/CLIConfigCommandTests.swift:generic-api-key:246
+
+# Tests/CodexBarTests/ClaudeOAuthTests.swift
+7d0812540dd2e8870a251a619a44ea26087bb4e2:Tests/CodexBarTests/ClaudeOAuthTests.swift:generic-api-key:24
+
+# Tests/CodexBarTests/CostUsageClaudeVertexClassifierTests.swift
+2570a034feaa6bb6ee41714f4ab07881b81cf043:Tests/CodexBarTests/CostUsageClaudeVertexClassifierTests.swift:generic-api-key:227
+c82056d25203ec7ba887050c203c491b43ee7283:Tests/CodexBarTests/CostUsageClaudeVertexClassifierTests.swift:generic-api-key:227
+
+# Tests/CodexBarTests/CurlCaptureParserTests.swift
+264ba395cd98d70eeb616ace6530cb6fa85a1703:Tests/CodexBarTests/CurlCaptureParserTests.swift:curl-auth-header:21
+264ba395cd98d70eeb616ace6530cb6fa85a1703:Tests/CodexBarTests/CurlCaptureParserTests.swift:curl-auth-header:37
+264ba395cd98d70eeb616ace6530cb6fa85a1703:Tests/CodexBarTests/CurlCaptureParserTests.swift:curl-auth-header:8
+
+# Tests/CodexBarTests/DevinUsageFetcherTests.swift
+be4818c68c1af34d6e56428d889f7754374c0f40:Tests/CodexBarTests/DevinUsageFetcherTests.swift:generic-api-key:254
+be4818c68c1af34d6e56428d889f7754374c0f40:Tests/CodexBarTests/DevinUsageFetcherTests.swift:generic-api-key:279
+
+# Tests/CodexBarTests/Fixtures/codex-historical-usage-real-legacy.jsonl
+6aacc9122dc01907465a4b0c6a17da277e2884f1:Tests/CodexBarTests/Fixtures/codex-historical-usage-real-legacy.jsonl:generic-api-key:1
+6aacc9122dc01907465a4b0c6a17da277e2884f1:Tests/CodexBarTests/Fixtures/codex-historical-usage-real-legacy.jsonl:generic-api-key:2
+6aacc9122dc01907465a4b0c6a17da277e2884f1:Tests/CodexBarTests/Fixtures/codex-historical-usage-real-legacy.jsonl:generic-api-key:3
+6aacc9122dc01907465a4b0c6a17da277e2884f1:Tests/CodexBarTests/Fixtures/codex-historical-usage-real-legacy.jsonl:generic-api-key:4
+6aacc9122dc01907465a4b0c6a17da277e2884f1:Tests/CodexBarTests/Fixtures/codex-historical-usage-real-legacy.jsonl:generic-api-key:5
+6aacc9122dc01907465a4b0c6a17da277e2884f1:Tests/CodexBarTests/Fixtures/codex-historical-usage-real-legacy.jsonl:generic-api-key:6
+
+# Tests/CodexBarTests/IBMBobUsageFetcherTests.swift
+6e4a753340bdd60097695b2289e2d20166f38302:Tests/CodexBarTests/IBMBobUsageFetcherTests.swift:generic-api-key:88
+
+# Tests/CodexBarTests/MiniMaxProviderTests.swift
+17cdc54b26fa13362b6e19bc4b90cc66f9bd2115:Tests/CodexBarTests/MiniMaxProviderTests.swift:curl-auth-header:31
+e734d3e5a41b1cbfb2b6eddef23100412773f27d:Tests/CodexBarTests/MiniMaxProviderTests.swift:curl-auth-header:51
+
+# Tests/CodexBarTests/StepFunUsageFetcherTests.swift
+c51ec0f56950ec2993435cd686ed90fbb323b543:Tests/CodexBarTests/StepFunUsageFetcherTests.swift:generic-api-key:214
+
+# Tests/CodexBarTests/UsageStorePlanUtilizationCodexOwnershipTests.swift
+3089df398b2318ecc44e51a8dfa4bca1806d82b7:Tests/CodexBarTests/UsageStorePlanUtilizationCodexOwnershipTests.swift:generic-api-key:273
+6aacc9122dc01907465a4b0c6a17da277e2884f1:Tests/CodexBarTests/UsageStorePlanUtilizationCodexOwnershipTests.swift:generic-api-key:121
+6aacc9122dc01907465a4b0c6a17da277e2884f1:Tests/CodexBarTests/UsageStorePlanUtilizationCodexOwnershipTests.swift:generic-api-key:171
+6aacc9122dc01907465a4b0c6a17da277e2884f1:Tests/CodexBarTests/UsageStorePlanUtilizationCodexOwnershipTests.swift:generic-api-key:218
+6aacc9122dc01907465a4b0c6a17da277e2884f1:Tests/CodexBarTests/UsageStorePlanUtilizationCodexOwnershipTests.swift:generic-api-key:390
+f7ffe5b8ae6ede2182435c8c042ccb7f50bb3c2b:Tests/CodexBarTests/UsageStorePlanUtilizationCodexOwnershipTests.swift:generic-api-key:329
+
+# Tests/CodexBarTests/VertexAIOAuthCredentialsTests.swift
+7f1d60bfdd709dd46e8caad65c99ca2fc8345e9f:Tests/CodexBarTests/VertexAIOAuthCredentialsTests.swift:generic-api-key:44
+e936f584ff55a247a395fa3fdefb0733de14bdd6:Tests/CodexBarTests/VertexAIOAuthCredentialsTests.swift:generic-api-key:44
+
+# Tests/CodexBarTests/ZoomMateUsageFetcherTests.swift
+264ba395cd98d70eeb616ace6530cb6fa85a1703:Tests/CodexBarTests/ZoomMateUsageFetcherTests.swift:curl-auth-header:202
+
+# docs/vertexai.md
+6838b44961169c838022879c46a4eb22d52f1771:docs/vertexai.md:generic-api-key:39
+e4f1e4c7403504e9183f046ed6e60eeb278bea9a:docs/vertexai.md:generic-api-key:39
+fc095497409f66d638872221ace742a39e84e9fa:docs/vertexai.md:generic-api-key:39
+
+# docs/windsurf.md
+c52f00efcde1b3e989cb36b2786f48998b1cb867:docs/windsurf.md:gcp-api-key:108

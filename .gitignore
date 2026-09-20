@@ -45,3 +45,32 @@ docs/.astro/
 # Swift Package Manager metadata (leave sources tracked)
 # Packages/
 # Package.resolved
+
+# Credentials and local runtime data (examples remain reviewable)
+.env
+.env.*
+!.env.example
+!.env.sample
+*.pem
+*.p12
+*.pfx
+*.p8
+*.key
+id_rsa
+id_ed25519
+auth.json
+credentials.json
+secrets.json
+secrets/
+.config/usage-bar/
+.local/share/usage-bar/
+quota-history.json
+quota-backfill*.json
+*.sqlite
+*.sqlite3
+*.sqlite-*
+*.sqlite3-*
+*.db
+*.db-wal
+*.db-shm
+Usage Bar.app/

@@ -1,4 +1,11 @@
-
-# Personal Usage Bar build outputs
+# Build products
 .build/
 dist/
+
+# Local settings, exports, and diagnostics
+config.json
+*.local.json
+*.log
+quota.json
+backfill*.json
+gitleaks*.json
