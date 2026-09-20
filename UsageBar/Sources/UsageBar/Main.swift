@@ -61,7 +61,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         self.store.refresh()
         let view = Dashboard(store: self.store, openSettings: { [weak self] in self?.showSettings() })
         self.popover.contentViewController = NSHostingController(rootView: view)
-        self.popover.contentSize = NSSize(width: 390, height: 450)
+        self.popover.contentSize = NSSize(width: 390, height: 480)
         self.popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
         self.popover.contentViewController?.view.window?.makeKey()
     }

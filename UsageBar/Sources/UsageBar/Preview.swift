@@ -30,7 +30,7 @@ enum Preview {
         """.utf8), model: "Example-9B-Q5_K_M")
         let view = Dashboard(store: store, openSettings: {}).background(Color(nsColor: .windowBackgroundColor))
         let hosting = NSHostingView(rootView: view)
-        hosting.frame = NSRect(x: 0, y: 0, width: 390, height: 450)
+        hosting.frame = NSRect(x: 0, y: 0, width: 390, height: 480)
         hosting.layoutSubtreeIfNeeded()
         guard let bitmap = hosting.bitmapImageRepForCachingDisplay(in: hosting.bounds)
         else { throw UsageError.message("Preview rendering failed") }

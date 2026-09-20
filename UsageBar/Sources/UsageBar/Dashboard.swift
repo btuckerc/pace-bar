@@ -41,7 +41,7 @@ struct Dashboard: View {
             .buttonStyle(.borderless).font(.caption).foregroundStyle(.secondary)
             .padding(.horizontal, 18).padding(.vertical, 10)
         }
-        .frame(width: 390, height: 450)
+        .frame(width: 390, height: 480)
     }
 
     private var codexSection: some View {
