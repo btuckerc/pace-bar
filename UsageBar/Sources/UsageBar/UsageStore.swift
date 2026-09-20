@@ -19,6 +19,7 @@ final class UsageStore {
     var settingsError: String?
 
     @ObservationIgnored private let services = Services()
+    @ObservationIgnored private let quotaHistory = QuotaHistoryStore()
     @ObservationIgnored private var timer: Timer?
     @ObservationIgnored private var tasks: [String: Task<Void, Never>] = [:]
     @ObservationIgnored private var generation = 0
@@ -118,12 +119,6 @@ final class UsageStore {
                         do {
                             reading.snapshot = try await self.services.codex(account: account)
                             reading.updated = Date()
-                            if generation == self.generation, let snapshot = reading.snapshot {
-                                self.quotaForecast.record(
-                                    account: account.id,
-                                    windows: snapshot.windows,
-                                    at: reading.updated!)
-                            }
                             reading.error = nil
                         } catch {
                             reading.error = error is UsageError ? error.localizedDescription : "Connection unavailable"
@@ -136,6 +131,10 @@ final class UsageStore {
                         missing.error = "Sign-in source missing. Last reading retained."
                         readings.append(missing)
                     }
+                    let (forecast, saved) = await self.quotaHistory.record(readings)
+                    guard generation == self.generation, !Task.isCancelled else { return }
+                    self.quotaForecast = forecast
+                    self.errors["History"] = saved ? nil : "Quota history could not be saved; estimates may restart after quitting."
                     self.codex = readings
                 case "OpenRouter":
                     let value = try await self.services.openRouter(config)
@@ -179,7 +178,6 @@ final class UsageStore {
         self.host = nil
         self.cpuPercent = nil
         self.gpuEnergy = GPUEnergy()
-        self.quotaForecast = QuotaForecast()
         self.updated = [:]
         self.errors = [:]
         self.attempted = [:]

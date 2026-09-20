@@ -113,19 +113,18 @@ struct Dashboard: View {
         } else if let date = projection.exhaustion {
             value = "≈ " + self.forecastDate(date)
             detail = "Estimated exhaustion: \(date.formatted()). \(projection.method). Assumes this lane's pace continues."
-        } else if projection.method == "No consumption observed" {
-            value = "Unused"
-            detail = "No observed consumption from which to estimate exhaustion."
-        } else if projection.method == "Too early in this window" {
+        } else if projection.method == "Learning history" {
             value = "Learning"
-            detail = "Not enough elapsed time or recent observations to estimate exhaustion."
+            detail = "Needs two completed days with observed consumption. Uses up to 30 days, excluding today and idle days."
         } else {
             value = "To reset"
             detail = "At the observed pace this allowance lasts until its reset. \(projection.method)."
         }
         let prefix = window.lane.map { $0 == "gpt-reserve" ? "Reserve" : $0 }
             ?? (window.periodSeconds == 604_800 ? nil : window.compactLabel)
-        return (prefix.map { "\($0) · \(value)" } ?? value, detail)
+        return (
+            prefix.map { "\($0) · \(value)" } ?? value,
+            detail + (self.store.errors["History"].map { " \($0)" } ?? ""))
     }
 
     private func forecastDate(_ date: Date) -> String {

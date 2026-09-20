@@ -17,19 +17,11 @@ struct Probe {
                             switch provider {
                             case "Codex":
                                 let accounts = try CodexAccount.discover(config)
-                                var readings: [CodexReading] = []
                                 for (index, account) in accounts.enumerated() {
                                     let value = try await services.codex(account: account)
                                     print("Codex account \(index + 1): \(value.windows.count) quota windows")
-                                    readings.append(CodexReading(
-                                        id: account.id,
-                                        label: account.label,
-                                        snapshot: value,
-                                        updated: Date(),
-                                        error: nil))
                                 }
-                                let forecast = QuotaForecast().summarize(readings, now: Date())
-                                detail = "\(accounts.count) distinct accounts; forecast=\(forecast.outcome)"
+                                detail = "\(accounts.count) distinct accounts"
                             case "OpenRouter":
                                 let value = try await services.openRouter(config)
                                 detail = "balance=\(value.balance != nil), account spend=\(value.totalSpent != nil)"

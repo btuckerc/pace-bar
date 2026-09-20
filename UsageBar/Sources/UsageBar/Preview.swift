@@ -44,6 +44,22 @@ enum Preview {
         "additional_rate_limits":[{"limit_name":"gpt-reserve","rate_limit":{"primary_window":{
         "used_percent":0,"reset_at":\(Int(Date().timeIntervalSince1970 + 604_800)),"limit_window_seconds":604800}}}]}
         """.utf8))
+        for (index, account) in store.codex.enumerated() {
+            guard index != 2 else { continue }
+            for ago in [2, 1] {
+                let start = Calendar.current.startOfDay(for: Date()).addingTimeInterval(-Double(ago) * 86400 + 3600)
+                for (offset, used) in [(0.0, 0.0), (3600.0, [20.0, 5.0, 0.0, 60.0][index])] {
+                    let sample = try UsageParser.codex(Data("""
+                    {"plan_type":"pro","rate_limit":{"primary_window":{
+                    "used_percent":\(used),"reset_at":\(Int(start.timeIntervalSince1970 + 604_800)),"limit_window_seconds":604800}}}
+                    """.utf8))
+                    store.quotaForecast.record(
+                        account: account.id,
+                        windows: sample.windows,
+                        at: start.addingTimeInterval(offset))
+                }
+            }
+        }
         let view = Dashboard(store: store, openSettings: {}).background(Color(nsColor: .windowBackgroundColor))
         let hosting = NSHostingView(rootView: view)
         hosting.frame = NSRect(origin: .zero, size: hosting.fittingSize)
