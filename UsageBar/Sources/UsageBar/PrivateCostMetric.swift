@@ -4,13 +4,11 @@ struct PrivateCostMetric: View {
     let title: String
     let amount: Double?
     let explanation: String
-    var estimated = false
     @State private var visible = false
 
     private var value: String {
         guard let amount else { return "—" }
-        let formatted = amount > 0 && amount < 0.01 ? "<$0.01" : amount.formatted(.currency(code: "USD"))
-        return self.estimated ? "≈ \(formatted)" : formatted
+        return amount > 0 && amount < 0.01 ? "<$0.01" : amount.formatted(.currency(code: "USD"))
     }
 
     var body: some View {

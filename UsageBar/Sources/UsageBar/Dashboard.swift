@@ -108,24 +108,16 @@ struct Dashboard: View {
             }
 
             if self.store.codex.isEmpty { Text("—").foregroundStyle(.secondary) }
-            HStack(alignment: .bottom) {
+            VStack(alignment: .leading, spacing: 4) {
                 PrivateCostMetric(
                     title: "API equivalent · 30d",
                     amount: self.store.codexCost?.usd,
-                    explanation: self.codexCostHelp,
-                    estimated: true)
-                Text(self.codexCostCoverage)
+                    explanation: self.codexCostHelp)
+                Text("* Not billed spend")
                     .font(.system(size: 10)).foregroundStyle(.secondary)
-                    .multilineTextAlignment(.trailing)
+                    .help(self.codexCostHelp)
             }
         }
-    }
-
-    private var codexCostCoverage: String {
-        guard let cost = self.store.codexCost else { return "Local usage\nNot billed spend" }
-        if cost.usd == nil { return "Estimate unavailable\nNot billed spend" }
-        if cost.incomplete || cost.unpricedRecords > 0 { return "Partial estimate\nNot billed spend" }
-        return self.store.codexHistoryImported ? "Includes T3 history\nNot billed spend" : "Local usage\nNot billed spend"
     }
 
     private var codexCostHelp: String {
@@ -281,8 +273,7 @@ struct Dashboard: View {
                             title: "GPU cost",
                             amount: self.store.gpuEnergy.cost(rate: rate),
                             explanation: "Estimated GPU energy × $\(rate)/kWh since monitoring began. "
-                                + "Not API-equivalent cost. Excludes the rest of the host and PSU losses.",
-                            estimated: true)
+                                + "Not API-equivalent cost. Excludes the rest of the host and PSU losses.")
                     }
                 }
                 .help(
