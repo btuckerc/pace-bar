@@ -45,7 +45,12 @@ struct Dashboard: View {
 
     private var codexSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            self.heading("Codex", provider: "Codex", detail: "% left · reset")
+            HStack(spacing: 6) {
+                Text("Codex").font(.system(size: 13, weight: .semibold))
+                self.status("Codex")
+                Spacer()
+                self.forecast
+            }
             ForEach(self.store.codex) { account in
                 let stale = account.error != nil || account.updated.map {
                     Date().timeIntervalSince($0) > (self.store.constrained ? 1800 : 600)
@@ -90,6 +95,27 @@ struct Dashboard: View {
 
             if self.store.codex.isEmpty { Text("—").foregroundStyle(.secondary) }
         }
+    }
+
+    private var forecast: some View {
+        let summary = self.store.quotaForecast.summarize(
+            self.store.codex, now: Date(), freshness: self.store.constrained ? 1800 : 600)
+        let title: String = if self.store.errors["Codex"] != nil {
+            "Forecast —"
+        } else {
+            switch summary.outcome {
+            case let .exhausted(date):
+                date.timeIntervalSinceNow < 60 ? "All capped now" : "All capped ≈ " + self.forecastDate(date)
+            case let .resetFirst(date): "Reset first · " + self.forecastDate(date)
+            case .insufficient: "Forecast —"
+            }
+        }
+        return Text(title).font(.system(size: 11)).foregroundStyle(.secondary)
+            .lineLimit(1).help(summary.details)
+    }
+
+    private func forecastDate(_ date: Date) -> String {
+        date.formatted(.dateTime.weekday(.abbreviated).hour().minute())
     }
 
     private var routerSection: some View {

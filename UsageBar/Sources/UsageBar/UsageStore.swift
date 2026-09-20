@@ -11,6 +11,7 @@ final class UsageStore {
     var host: HostSnapshot?
     var cpuPercent: Double?
     var gpuEnergy = GPUEnergy()
+    var quotaForecast = QuotaForecast()
     var errors: [String: String] = [:]
     var updated: [String: Date] = [:]
     var refreshing: Set<String> = []
@@ -117,6 +118,12 @@ final class UsageStore {
                         do {
                             reading.snapshot = try await self.services.codex(account: account)
                             reading.updated = Date()
+                            if generation == self.generation, let snapshot = reading.snapshot {
+                                self.quotaForecast.record(
+                                    account: account.id,
+                                    windows: snapshot.windows,
+                                    at: reading.updated!)
+                            }
                             reading.error = nil
                         } catch {
                             reading.error = error is UsageError ? error.localizedDescription : "Connection unavailable"
@@ -172,6 +179,7 @@ final class UsageStore {
         self.host = nil
         self.cpuPercent = nil
         self.gpuEnergy = GPUEnergy()
+        self.quotaForecast = QuotaForecast()
         self.updated = [:]
         self.errors = [:]
         self.attempted = [:]
