@@ -77,8 +77,7 @@ struct Probe {
             snapshot = await history.records(authFile: configuration.codexAuthFile, now: now)
             passes += 1
         }
-        let pricing = APICostPricing(
-            t3Directory: FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".t3/userdata"))
+        let pricing = APICostPricing()
         let estimate = await pricing.estimate(records: snapshot.records, incomplete: snapshot.incomplete, now: now)
         var models: [String: [String: Double]] = [:]
         for record in snapshot.records {
@@ -101,7 +100,7 @@ struct Probe {
             "pendingScan": snapshot.pendingScan,
             "pricedRecords": estimate.pricedRecords,
             "unpricedRecords": estimate.unpricedRecords,
-            "usesT3Pricing": estimate.usesT3Pricing,
+            "weekUSD": estimate.weekUSD as Any? ?? NSNull(),
             "usd": estimate.usd as Any? ?? NSNull(),
             "models": models,
         ]
@@ -113,7 +112,7 @@ struct Probe {
             to: file,
             options: .withoutOverwriting)
         try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: file.path)
-        print("T3 history imported: \(snapshot.importedT3); retained records: \(snapshot.retainedRecords).")
+        print("Local usage history: \(snapshot.retainedRecords) retained records.")
         print(
             "30-day priced records: \(estimate.pricedRecords); unpriced: \(estimate.unpricedRecords); partial: \(estimate.incomplete).")
         print("Private reconciliation report written. No account probes were run.")

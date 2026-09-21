@@ -8,11 +8,11 @@ Codex, local inference, and OpenRouter in one quiet macOS menu bar.
 
 **[Download for Apple Silicon](https://github.com/btuckerc/usage-bar/releases/latest)** · **[Download source](https://github.com/btuckerc/usage-bar/archive/refs/heads/main.zip)** · **[Setup](UsageBar/docs/setup.md)** · **[How it works](UsageBar/docs/reference.md)** · **[Contributing](CONTRIBUTING.md)**
 
-- **Codex:** separate account quotas, reset credits, a shared usage runway, and a blurred 30-day API-equivalent cost with automatic T3 history import.
+- **Codex:** separate account quotas, reset credits, a shared usage runway, and private 7-day/30-day API-equivalent costs calculated directly from Codex, OMP, and Pi usage.
 - **Local inference:** llama-server token counts and speed, plus optional GPU, memory, and energy readings.
 - **OpenRouter:** account balance and click-to-reveal lifetime credit spend, kept distinct from estimated API cost.
 
-Built with SwiftUI and AppKit. No third-party runtime dependencies, web views, or analytics. Cloud usage refreshes every five minutes; host metrics every minute. Sampling slows down in Low Power Mode.
+Built with SwiftUI and AppKit. No third-party runtime dependencies, web views, or analytics. Cloud usage refreshes every five minutes; local cost estimates and host metrics every minute. Sampling slows down in Low Power Mode.
 
 ## Install the app
 
@@ -46,7 +46,7 @@ Distribution is through **GitHub Releases, not the Mac App Store**. [Apple Devel
 ```sh
 python3 ../mac-releases/release.py --help
 python3 ../mac-releases/release.py build usage-bar \
-  --version 0.2.3 --build-number 6 --identity "Developer ID Application: Your Name (TEAMID)"
+  --version 0.2.3 --build-number 7 --identity "Developer ID Application: Your Name (TEAMID)"
 ```
 
 The sibling `mac-releases` checkout provides the shared Apple-toolchain release pipeline for all four apps. One-time setup: create/import a **Developer ID Application** certificate and its private key in macOS Keychain, then run `xcrun notarytool store-credentials mac-releases` interactively. Keep credentials and certificate exports outside Git. Apple Development and ad-hoc identities cannot produce public releases.
@@ -59,7 +59,7 @@ For build-only integration, use `python3 UsageBar/scripts/build-release.py --rel
 
 ## A few details
 
-Usage Bar reads existing sign-ins without modifying them. Account names are nicknames, and credentials stay in their original files. Local history powers the estimates; no usage data is sent to the project. On first use, T3's retained usage metadata is imported automatically. Subsequent scans read appended usage and preserve history even when source logs disappear.
+Usage Bar reads existing sign-ins without modifying them. Account names are nicknames, and credentials stay in their original files. Local history powers the estimates; no usage data is sent to the project. Codex/OpenAI token usage is scanned directly from Codex, OMP, and Pi sessions and priced independently. An optional one-time T3 history bootstrap preserves older usage, but ongoing calculation does not require T3. Appended usage is read incrementally and history survives removal of the original logs.
 
 The runway assumes you use accounts in order, at your average pace over active days in the last 30 days. It includes known resets. It is an estimate, not an account switcher. GPU energy is GPU-only, and local inference counters reset when the model process restarts. [Details and limitations →](UsageBar/docs/reference.md)
 

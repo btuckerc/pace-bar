@@ -8,7 +8,6 @@ final class UsageStore {
     var codex: [CodexReading] = []
     var router: OpenRouterSnapshot?
     var codexCost: APICostEstimate?
-    var codexHistoryImported = false
     var nous: NousSnapshot?
     var nousLifetime: NousLifetimeTotals?
     var host: HostSnapshot?
@@ -26,8 +25,7 @@ final class UsageStore {
     @ObservationIgnored private let quotaHistory = QuotaHistoryStore()
     @ObservationIgnored private let nousHistory = NousHistoryStore()
     @ObservationIgnored private let costHistory = CodexCostHistory()
-    @ObservationIgnored private let costPricing = APICostPricing(
-        t3Directory: FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".t3/userdata"))
+    @ObservationIgnored private let costPricing = APICostPricing()
     @ObservationIgnored private var timer: Timer?
     @ObservationIgnored private var tasks: [String: Task<Void, Never>] = [:]
     @ObservationIgnored private var generation = 0
@@ -98,7 +96,7 @@ final class UsageStore {
         let cloudInterval: TimeInterval = self.constrained ? 900 : 300
         let nousInterval: TimeInterval = self.constrained ? 300 : 60
         self.schedule("Codex", interval: cloudInterval, force: force)
-        self.schedule("Codex cost", interval: cloudInterval, force: force)
+        self.schedule("Codex cost", interval: self.constrained ? 300 : 60, force: force)
         self.schedule("OpenRouter", interval: cloudInterval, force: force)
         self.schedule("Nous", interval: nousInterval, force: force)
         if self.configuration.hostUtilization {
@@ -165,7 +163,6 @@ final class UsageStore {
                         records: history.records, incomplete: history.incomplete, now: now)
                     guard generation == self.generation, !Task.isCancelled else { return }
                     self.codexCost = estimate
-                    self.codexHistoryImported = history.importedT3
                 case "OpenRouter":
                     let value = try await self.services.openRouter(config)
                     guard generation == self.generation else { return }
@@ -213,7 +210,6 @@ final class UsageStore {
         self.settingsError = nil
         self.codex = []
         self.codexCost = nil
-        self.codexHistoryImported = false
         self.router = nil
         self.nous = nil
         self.nousLifetime = nil

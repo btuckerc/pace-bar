@@ -4,12 +4,9 @@
 
 - Distribute the standalone Apple Silicon app as a Developer ID–signed, Apple-notarized ZIP with a stapled ticket, checksums, and source-commit metadata.
 - Add a macOS application icon based on the four-arc Orbit menu-bar mark.
+- Re-release build 7: calculate independent 7-day and 30-day Codex/OpenAI API-equivalent costs directly from native Codex, OMP, and Pi sessions. Refresh local usage every minute with independent pricing; retain historical imports without requiring T3.
 
 ## 0.62.1 — Unreleased
-
-### Added
-
-- Standalone Usage Bar: show private-by-default 30-day Codex API-equivalent cost, automatically import and retain T3 usage history, reuse T3 pricing overrides and calendar windows, and distinguish estimates from OpenRouter lifetime spend and GPU electricity cost.
 
 ### Fixed
 

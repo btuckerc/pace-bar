@@ -30,30 +30,38 @@ public struct APICostRecord: Sendable {
 
 public struct APICostEstimate: Sendable {
     public let usd: Double?
+    public let weekUSD: Double?
     public let unpricedRecords: Int
     public let pricedRecords: Int
     public let incomplete: Bool
     public let ratesUpdated: Date?
-    public let usesT3Pricing: Bool
 
     public init(
         usd: Double?, unpricedRecords: Int, pricedRecords: Int, incomplete: Bool,
-        ratesUpdated: Date?, usesT3Pricing: Bool = false)
+        ratesUpdated: Date?, weekUSD: Double? = nil)
     {
         self.usd = usd
+        self.weekUSD = weekUSD
         self.unpricedRecords = unpricedRecords
         self.pricedRecords = pricedRecords
         self.incomplete = incomplete
         self.ratesUpdated = ratesUpdated
-        self.usesT3Pricing = usesT3Pricing
     }
 }
 
-/// T3's “30 days”: today and the preceding 29 calendar days in the viewer's time zone.
+/// Calendar windows include today and the preceding local calendar days.
 public enum APICostWindow {
     public static func bounds(now: Date, calendar: Calendar = .current) -> Range<Date> {
+        self.bounds(now: now, days: 30, calendar: calendar)
+    }
+
+    public static func weekBounds(now: Date, calendar: Calendar = .current) -> Range<Date> {
+        self.bounds(now: now, days: 7, calendar: calendar)
+    }
+
+    private static func bounds(now: Date, days: Int, calendar: Calendar) -> Range<Date> {
         let day = calendar.startOfDay(for: now)
-        let start = calendar.date(byAdding: .day, value: -29, to: day) ?? day
+        let start = calendar.date(byAdding: .day, value: -(days - 1), to: day) ?? day
         let end = calendar.date(byAdding: .day, value: 1, to: day) ?? now
         return start..<end
     }
@@ -82,41 +90,62 @@ public actor APICostPricing {
     private static let catalogURL = URL(string:
         "https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json")!
     private let cacheFile: URL
-    private let t3Directory: URL?
     private var rates: [String: CatalogRate] = [:]
-    private var overrides: [String: CatalogRate] = [:]
     private var ratesUpdated: Date?
     private var loaded = false
     private var attemptedAt: Date?
-    private var t3Stamp: String?
-    private var pricingIncomplete = false
-    private var usesT3Pricing = false
 
-    public init(cacheFile: URL = APICostPricing.defaultCacheFile(), t3Directory: URL? = nil) {
+    /// Standard API rates from CodexBar's OpenAI pricing table; not fast/batch/long-context billing.
+    /// These keep known models priceable offline and when the public catalog has not caught up.
+    private static let bundled: [String: CatalogRate] = [
+        "gpt-5": .init(input: 1.25e-6, output: 1e-5, cacheRead: 1.25e-7),
+        "gpt-5-codex": .init(input: 1.25e-6, output: 1e-5, cacheRead: 1.25e-7),
+        "gpt-5-mini": .init(input: 2.5e-7, output: 2e-6, cacheRead: 2.5e-8),
+        "gpt-5-nano": .init(input: 5e-8, output: 4e-7, cacheRead: 5e-9),
+        "gpt-5-pro": .init(input: 1.5e-5, output: 1.2e-4),
+        "gpt-5.1": .init(input: 1.25e-6, output: 1e-5, cacheRead: 1.25e-7),
+        "gpt-5.1-codex": .init(input: 1.25e-6, output: 1e-5, cacheRead: 1.25e-7),
+        "gpt-5.1-codex-max": .init(input: 1.25e-6, output: 1e-5, cacheRead: 1.25e-7),
+        "gpt-5.1-codex-mini": .init(input: 2.5e-7, output: 2e-6, cacheRead: 2.5e-8),
+        "gpt-5.2": .init(input: 1.75e-6, output: 1.4e-5, cacheRead: 1.75e-7),
+        "gpt-5.2-codex": .init(input: 1.75e-6, output: 1.4e-5, cacheRead: 1.75e-7),
+        "gpt-5.2-pro": .init(input: 2.1e-5, output: 1.68e-4),
+        "gpt-5.3-codex": .init(input: 1.75e-6, output: 1.4e-5, cacheRead: 1.75e-7),
+        "gpt-5.3-codex-spark": .init(input: 0, output: 0, cacheRead: 0),
+        "gpt-5.4": .init(input: 2.5e-6, output: 1.5e-5, cacheRead: 2.5e-7),
+        "gpt-5.4-mini": .init(input: 7.5e-7, output: 4.5e-6, cacheRead: 7.5e-8),
+        "gpt-5.4-nano": .init(input: 2e-7, output: 1.25e-6, cacheRead: 2e-8),
+        "gpt-5.4-pro": .init(input: 3e-5, output: 1.8e-4),
+        "gpt-5.5": .init(input: 5e-6, output: 3e-5, cacheRead: 5e-7),
+        "gpt-5.5-pro": .init(input: 3e-5, output: 1.8e-4),
+        "gpt-5.6-sol": .init(input: 5e-6, output: 3e-5, cacheRead: 5e-7, cacheWrite: 6.25e-6),
+        "gpt-5.6-terra": .init(input: 2e-6, output: 1.2e-5, cacheRead: 2e-7, cacheWrite: 2.5e-6),
+        "gpt-5.6-luna": .init(input: 2e-7, output: 1.2e-6, cacheRead: 2e-8, cacheWrite: 2.5e-7),
+        "gpt-6-astra": .init(input: 1e-5, output: 5e-5, cacheRead: 1e-6, cacheWrite: 1.25e-5),
+    ]
+
+    public init(cacheFile: URL = APICostPricing.defaultCacheFile()) {
         self.cacheFile = cacheFile
-        self.t3Directory = t3Directory
     }
 
     public func estimate(
         records: [APICostRecord], incomplete: Bool, now: Date = Date(),
         calendar: Calendar = .current) async -> APICostEstimate
     {
-        let window = APICostWindow.bounds(now: now, calendar: calendar)
-        guard records.contains(where: { window.contains($0.date) }) else {
+        let month = APICostWindow.bounds(now: now, calendar: calendar)
+        let week = APICostWindow.weekBounds(now: now, calendar: calendar)
+        guard records.contains(where: { month.contains($0.date) }) else {
             return APICostEstimate(
-                usd: nil,
-                unpricedRecords: 0,
-                pricedRecords: 0,
-                incomplete: incomplete,
-                ratesUpdated: nil)
+                usd: nil, unpricedRecords: 0, pricedRecords: 0, incomplete: incomplete, ratesUpdated: nil)
         }
         await self.loadRatesIfNeeded(now: now)
         var total = 0.0
+        var weekTotal = 0.0
         var priced = 0
         var unknown = 0
-        for record in records where window.contains(record.date) {
-            let model = record.model.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard let rate = self.overrides[model] ?? Self.rate(for: model, in: self.rates),
+        var weekPriced = 0
+        for record in records where month.contains(record.date) {
+            guard let rate = Self.rate(for: record.model, in: self.rates),
                   let amount = Self.cost(tokens: record.tokens, rate: rate), (total + amount).isFinite
             else {
                 unknown += 1
@@ -124,11 +153,15 @@ public actor APICostPricing {
             }
             total += amount
             priced += 1
+            if week.contains(record.date) {
+                weekTotal += amount
+                weekPriced += 1
+            }
         }
         return APICostEstimate(
             usd: priced > 0 ? total : nil, unpricedRecords: unknown, pricedRecords: priced,
-            incomplete: incomplete || unknown > 0 || self.pricingIncomplete,
-            ratesUpdated: self.ratesUpdated, usesT3Pricing: self.usesT3Pricing)
+            incomplete: incomplete || unknown > 0, ratesUpdated: self.ratesUpdated,
+            weekUSD: weekPriced > 0 ? weekTotal : nil)
     }
 
     public static func parseCatalog(_ data: Data) -> [String: CatalogRate] {
@@ -136,25 +169,21 @@ public actor APICostPricing {
         var result: [String: CatalogRate] = [:]
         for (key, value) in object {
             guard let item = value as? [String: Any],
-                  let input = Self.number(item["input_cost_per_token"]),
-                  let output = Self.number(item["output_cost_per_token"]) else { continue }
-            let read = Self.number(item["cache_read_input_token_cost"])
-            let write = Self.number(item["cache_creation_input_token_cost"])
+                  let input = self.number(item["input_cost_per_token"]),
+                  let output = self.number(item["output_cost_per_token"]) else { continue }
+            let read = self.number(item["cache_read_input_token_cost"])
+            let write = self.number(item["cache_creation_input_token_cost"])
             guard item["cache_read_input_token_cost"] == nil || read != nil,
                   item["cache_creation_input_token_cost"] == nil || write != nil else { continue }
-            let normalized = key.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-            result[normalized] = CatalogRate(
-                input: input,
-                output: output,
-                cacheRead: read ?? input,
-                cacheWrite: write ?? input)
+            result[key.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()] = CatalogRate(
+                input: input, output: output, cacheRead: read ?? input, cacheWrite: write ?? input)
         }
         var candidates: [String: CatalogRate] = [:]
         var conflicting = Set<String>()
         for (key, rate) in result {
             let bare = String(key.split(separator: "/").last ?? "")
             guard bare != key, result[bare] == nil else { continue }
-            if let existing = candidates[bare], existing != rate { conflicting.insert(bare) }
+            if let old = candidates[bare], old != rate { conflicting.insert(bare) }
             candidates[bare] = rate
         }
         for (name, rate) in candidates where !conflicting.contains(name) {
@@ -164,8 +193,7 @@ public actor APICostPricing {
     }
 
     public static func cost(tokens: APICostTokens, rate: CatalogRate) -> Double? {
-        guard self.valid(rate),
-              tokens.input.isFinite, tokens.input >= 0, tokens.output.isFinite, tokens.output >= 0,
+        guard self.valid(rate), tokens.input.isFinite, tokens.input >= 0, tokens.output.isFinite, tokens.output >= 0,
               tokens.cachedInput.isFinite, tokens.cachedInput >= 0, tokens.cacheWrite.isFinite, tokens.cacheWrite >= 0,
               tokens.cachedInput + tokens.cacheWrite <= tokens.input else { return nil }
         let result = (tokens.input - tokens.cachedInput - tokens.cacheWrite) * rate.input
@@ -177,13 +205,22 @@ public actor APICostPricing {
     public static func rate(for model: String, in catalog: [String: CatalogRate]) -> CatalogRate? {
         let key = model.trimmingCharacters(in: .whitespacesAndNewlines).lowercased().split(separator: "[", maxSplits: 1)
             .first.map(String.init) ?? ""
-        let bare = String(key.split(separator: "/").last ?? "")
-        guard !["", "opus", "sonnet", "haiku", "fable", "synthetic", "<synthetic>"].contains(bare) else { return nil }
-        return catalog[key]
+        guard !["", "opus", "sonnet", "haiku", "fable", "synthetic", "<synthetic>"].contains(key) else { return nil }
+        if let exact = catalog[key] { return exact }
+        let bare: String = if key.hasPrefix("openai/") || key.hasPrefix("openai-codex/") {
+            String(key.split(separator: "/", maxSplits: 1).last ?? "")
+        } else {
+            key
+        }
+        let normalized = switch bare {
+        case "gpt-5.6": "gpt-5.6-sol"
+        case "gpt-reserve": "gpt-5.6-luna"
+        default: bare
+        }
+        return catalog[normalized] ?? self.bundled[normalized]
     }
 
     private func loadRatesIfNeeded(now: Date) async {
-        if self.loadT3Rates(now: now) { return }
         if !self.loaded {
             self.loaded = true
             if let data = try? Self.read(self.cacheFile, limit: 12 * 1024 * 1024),
@@ -218,75 +255,12 @@ public actor APICostPricing {
             self.rates = parsed
             self.ratesUpdated = now
             try FileManager.default.createDirectory(
-                at: self.cacheFile.deletingLastPathComponent(),
-                withIntermediateDirectories: true)
+                at: self.cacheFile.deletingLastPathComponent(), withIntermediateDirectories: true)
             try JSONEncoder().encode(Cache(fetchedAt: now, rates: parsed)).write(to: self.cacheFile, options: .atomic)
             try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: self.cacheFile.path)
         } catch {
-            // A dated cache stays usable offline; unknown prices never become a fabricated zero.
+            // Dated cache and bundled known prices remain usable offline; unknown models stay unpriced.
         }
-    }
-
-    private func loadT3Rates(now: Date) -> Bool {
-        guard let directory = self.t3Directory else { return false }
-        let ratesFile = directory.appendingPathComponent("usage-model-rates.json")
-        guard FileManager.default.fileExists(atPath: ratesFile.path) else { return false }
-        let settingsFile = directory.appendingPathComponent("settings.json")
-        let stamp = [ratesFile, settingsFile].map { url in
-            let values = try? url.resourceValues(forKeys: [.fileSizeKey, .contentModificationDateKey])
-            return "\(values?.fileSize ?? -1):\(values?.contentModificationDate?.timeIntervalSince1970 ?? 0)"
-        }.joined(separator: "|")
-        if self.t3Stamp == stamp { return true }
-        do {
-            let data = try Self.read(ratesFile, limit: 12 * 1024 * 1024)
-            guard let root = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  let milliseconds = Self.number(root["fetchedAtMs"]), milliseconds / 1000 <= now.timeIntervalSince1970,
-                  let document = root["document"] as? [String: Any]
-            else { throw UsageError.message("Invalid T3 pricing cache.") }
-            let catalog = try Self.parseCatalog(JSONSerialization.data(withJSONObject: document))
-            guard !catalog.isEmpty else { throw UsageError.message("No valid T3 prices.") }
-            var overrides: [String: CatalogRate] = [:]
-            if FileManager.default.fileExists(atPath: settingsFile.path) {
-                let data = try Self.read(settingsFile, limit: 1_048_576)
-                guard let settings = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-                    throw UsageError.message("Invalid T3 settings.")
-                }
-                if let raw = settings["usagePriceOverrides"] {
-                    guard let values = raw as? [String: [String: Any]]
-                    else { throw UsageError.message("Invalid T3 overrides.") }
-                    for (model, value) in values {
-                        guard let input = Self.number(value["inputCostPerMillionTokens"]),
-                              let output = Self.number(value["outputCostPerMillionTokens"])
-                        else {
-                            throw UsageError.message("Invalid T3 override price.")
-                        }
-                        let read = Self.number(value["cacheReadCostPerMillionTokens"])
-                        let write = Self.number(value["cacheWriteCostPerMillionTokens"])
-                        guard value["cacheReadCostPerMillionTokens"] == nil || read != nil,
-                              value["cacheWriteCostPerMillionTokens"] == nil || write != nil
-                        else {
-                            throw UsageError.message("Invalid T3 cache price.")
-                        }
-                        overrides[model.trimmingCharacters(in: .whitespacesAndNewlines)] = CatalogRate(
-                            input: input / 1_000_000, output: output / 1_000_000,
-                            cacheRead: (read ?? input) / 1_000_000, cacheWrite: (write ?? input) / 1_000_000)
-                    }
-                }
-            }
-            self.rates = catalog
-            self.overrides = overrides
-            self.ratesUpdated = Date(timeIntervalSince1970: milliseconds / 1000)
-            self.pricingIncomplete = false
-            self.usesT3Pricing = true
-            self.t3Stamp = stamp
-        } catch {
-            self.rates = [:]
-            self.overrides = [:]
-            self.pricingIncomplete = true
-            self.usesT3Pricing = false
-            // Retry after a transient/partial T3 write. Do not substitute unrelated rates while claiming parity.
-        }
-        return true
     }
 
     private static func read(_ file: URL, limit: Int) throws -> Data {

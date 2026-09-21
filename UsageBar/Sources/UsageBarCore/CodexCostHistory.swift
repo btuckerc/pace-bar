@@ -11,6 +11,13 @@ public actor CodexCostHistory {
     private var storageAvailable = true
     private var savePending = false
 
+    private struct ScanFile {
+        let url: URL
+        let provider: String
+        let size: Int
+        let modified: Date
+    }
+
     public init(
         home: URL = FileManager.default.homeDirectoryForCurrentUser,
         archiveFile: URL? = nil, t3Directory: URL? = nil)
@@ -32,23 +39,22 @@ public actor CodexCostHistory {
         let files = self.files(authFile: authFile, incomplete: &incomplete)
         var budget = 512 * 1024 * 1024
         var pending = false
-        for file in files {
+        for source in files {
             if Task.isCancelled { incomplete = true; pending = true; break }
-            guard let values = try? file.resourceValues(forKeys: [.fileSizeKey, .contentModificationDateKey]),
-                  let size = values.fileSize, let modified = values.contentModificationDate
-            else {
-                incomplete = true
-                continue
-            }
-            let milliseconds = modified.timeIntervalSince1970 * 1000
+            let file = source.url
+            let size = source.size
+            let milliseconds = source.modified.timeIntervalSince1970 * 1000
             let cached = self.archive.files[file.path]
-            if let cached, cached.size == size, abs(cached.mtimeMs - milliseconds) < 0.01, !cached.pendingScan {
+            if let cached, cached.provider == source.provider, cached.size == size,
+               abs(cached.mtimeMs - milliseconds) < 0.01, !cached.pendingScan
+            {
                 incomplete = incomplete || cached.incomplete
                 continue
             }
             guard budget > 0 else { pending = true; continue }
             guard let parsed = self.scanner.read(
-                file: file, previous: cached, size: size, mtimeMs: milliseconds, budget: &budget)
+                file: file, previous: cached, size: size, mtimeMs: milliseconds, budget: &budget,
+                provider: source.provider)
             else {
                 incomplete = true // A read error never replaces retained records with an empty file.
                 continue
@@ -65,7 +71,7 @@ public actor CodexCostHistory {
         var retained = 0
         for (path, file) in self.archive.files.sorted(by: { $0.key < $1.key }) {
             retained += file.records.count + file.tail.count
-            guard file.provider == "codex" else { continue }
+            guard file.provider == "codex" || file.provider == "omp" else { continue }
             incomplete = incomplete || file.incomplete || file.pendingScan
             var occurrences: [String: Int] = [:]
             for event in [file.records, file.tail].joined() {
@@ -107,6 +113,7 @@ public actor CodexCostHistory {
     }
 
     private func importT3(incomplete: inout Bool) -> Bool {
+        guard !self.archive.importedT3 else { return false }
         let file = self.t3Directory.appendingPathComponent("usage-scan-cache.json")
         guard FileManager.default.fileExists(atPath: file.path) else { return false }
         guard let values = try? file.resourceValues(forKeys: [.fileSizeKey, .contentModificationDateKey]),
@@ -138,58 +145,89 @@ public actor CodexCostHistory {
         }
     }
 
-    private func files(authFile: String, incomplete: inout Bool) -> [URL] {
+    private func files(authFile: String, incomplete: inout Bool) -> [ScanFile] {
         let manager = FileManager.default
-        var roots = [
+        var nativeRoots = [
             self.home.appendingPathComponent(".codex"),
             Configuration.expand(authFile).deletingLastPathComponent(),
         ]
-        roots += self.t3Homes(incomplete: &incomplete)
+        nativeRoots += self.t3Homes(incomplete: &incomplete)
         for name in [".codex-t3", ".codex-gui"] {
             let parent = self.home.appendingPathComponent(name)
             guard manager.fileExists(atPath: parent.path) else { continue }
-            do { roots += try manager.contentsOfDirectory(
-                at: parent,
-                includingPropertiesForKeys: nil,
-                options: [.skipsHiddenFiles]) } catch { incomplete = true }
+            do {
+                nativeRoots += try manager.contentsOfDirectory(
+                    at: parent, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles])
+            } catch { incomplete = true }
         }
-        var directories: [URL] = []
-        for root in roots {
-            for name in ["sessions", "archived_sessions"] {
-                let directory = root.appendingPathComponent(name).resolvingSymlinksInPath().standardizedFileURL
-                if manager.fileExists(atPath: directory.path) { directories.append(directory) }
+        var agentRoots = [
+            self.home.appendingPathComponent(".omp/agent"),
+            self.home.appendingPathComponent(".pi/agent"),
+            self.home.appendingPathComponent(".local/share/omp"),
+        ]
+        for name in [".omp", ".pi"] {
+            let profiles = self.home.appendingPathComponent(name).appendingPathComponent("profiles")
+            guard manager.fileExists(atPath: profiles.path) else { continue }
+            do {
+                let entries = try manager.contentsOfDirectory(
+                    at: profiles, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles])
+                agentRoots += entries.map { $0.appendingPathComponent("agent") }
+            } catch { incomplete = true }
+        }
+        var directories: [(url: URL, provider: String)] = []
+        for (roots, provider) in [(nativeRoots, "codex"), (agentRoots, "omp")] {
+            for root in roots {
+                let names = provider == "codex" ? ["sessions", "archived_sessions"] : ["sessions"]
+                for name in names {
+                    let directory = root.appendingPathComponent(name).resolvingSymlinksInPath().standardizedFileURL
+                    if manager.fileExists(atPath: directory.path) { directories.append((directory, provider)) }
+                }
             }
         }
         var visited = Set<String>()
-        var found: [String: URL] = [:]
-        // Source settings can change or disappear after onboarding; retain and follow already-known local files.
-        for (path, entry) in self.archive.files where entry.provider == "codex" && manager.fileExists(atPath: path) {
-            found[path] = URL(fileURLWithPath: path)
+        var found: [String: (url: URL, provider: String)] = [:]
+        // Keep following known sources even if a client's source setting is later removed.
+        for (path, entry) in self.archive.files
+            where (entry.provider == "codex" || entry.provider == "omp") && manager.fileExists(atPath: path)
+        {
+            found[path] = (URL(fileURLWithPath: path), entry.provider)
         }
         while let directory = directories.popLast() {
             if Task.isCancelled { incomplete = true; break }
-            guard visited.insert(directory.path).inserted else { continue }
+            guard visited.insert(directory.url.path).inserted else { continue }
             do {
                 let entries = try manager.contentsOfDirectory(
-                    at: directory, includingPropertiesForKeys: [.isDirectoryKey, .isRegularFileKey, .isSymbolicLinkKey],
-                    options: [.skipsHiddenFiles])
-                for entry in entries {
-                    let values = try entry.resourceValues(forKeys: [
+                    at: directory.url, includingPropertiesForKeys: [
                         .isDirectoryKey,
                         .isRegularFileKey,
                         .isSymbolicLinkKey,
+                    ],
+                    options: [.skipsHiddenFiles])
+                for entry in entries {
+                    let values = try entry.resourceValues(forKeys: [
+                        .isDirectoryKey, .isRegularFileKey, .isSymbolicLinkKey,
                     ])
                     if values.isSymbolicLink == true { continue }
-                    if values.isDirectory == true { directories.append(entry) } else if values.isRegularFile == true,
-                                                                                        entry.pathExtension == "jsonl"
-                    {
+                    if values.isDirectory == true {
+                        directories.append((entry, directory.provider))
+                    } else if values.isRegularFile == true, entry.pathExtension == "jsonl" {
                         let canonical = entry.resolvingSymlinksInPath().standardizedFileURL
-                        found[canonical.path] = canonical
+                        found[canonical.path] = (canonical, directory.provider)
                     }
                 }
             } catch { incomplete = true }
         }
-        return found.values.sorted { $0.path < $1.path }
+        return found.values.compactMap { source -> ScanFile? in
+            guard let values = try? source.url.resourceValues(forKeys: [.fileSizeKey, .contentModificationDateKey]),
+                  let size = values.fileSize, let modified = values.contentModificationDate
+            else { incomplete = true; return nil }
+            return ScanFile(url: source.url, provider: source.provider, size: size, modified: modified)
+        }.sorted {
+            // Current client activity should not wait behind a large native-history bootstrap.
+            if ($0.provider == "omp") != ($1.provider == "omp") { return $0.provider == "omp" }
+            if $0.modified != $1.modified { return $0.modified > $1.modified }
+            return $0.url.path < $1.url.path
+        }
     }
 
     private func t3Homes(incomplete: inout Bool) -> [URL] {
@@ -209,15 +247,17 @@ public actor CodexCostHistory {
             if let config = (settings["providers"] as? [String: Any])?["codex"] as? [String: Any] {
                 entries.append(["config": config])
             }
-            return entries.compactMap { entry in
+            return entries.flatMap { entry -> [URL] in
                 let config = entry["config"] as? [String: Any] ?? [:]
                 let environment = entry["environment"] as? [String: String] ?? [:]
                 let configured = (config["homePath"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
                 let shadow = (config["shadowHomePath"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-                let path = configured.isEmpty && shadow.isEmpty ? (environment["CODEX_HOME"] ?? "") : configured
-                if path.isEmpty { return self.home.appendingPathComponent(".codex") }
-                if path.hasPrefix("~/") { return self.home.appendingPathComponent(String(path.dropFirst(2))) }
-                return URL(fileURLWithPath: path)
+                let candidates = [configured, shadow, environment["CODEX_HOME"] ?? ""]
+                let paths = candidates.filter { !$0.isEmpty }.map { path -> URL in
+                    if path.hasPrefix("~/") { return self.home.appendingPathComponent(String(path.dropFirst(2))) }
+                    return URL(fileURLWithPath: path)
+                }
+                return paths.isEmpty ? [self.home.appendingPathComponent(".codex")] : paths
             }
         } catch { incomplete = true; return [] }
     }

@@ -61,7 +61,7 @@ struct CodexHistoryArchive: Sendable {
         for (path, entry) in entries {
             guard path.hasPrefix("/"),
                   let size = Self.integer(entry["s"]), let modified = Self.number(entry["m"]),
-                  let provider = entry["p"] as? String, ["codex", "claude", "grok"].contains(provider),
+                  let provider = entry["p"] as? String, ["codex", "omp", "claude", "grok"].contains(provider),
                   let rows = entry["r"] as? [[Any]], let tailRows = entry["t"] as? [[Any]],
                   let offset = Self.integer(entry["o"]), offset <= size,
                   let length = Self.integer(entry["gl"]), length <= 64, length <= offset,

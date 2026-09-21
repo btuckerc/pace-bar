@@ -125,3 +125,72 @@ private struct CostHistoryFixture {
     #expect(after.records.reduce(0) { $0 + $1.tokens.input } == 30)
     #expect(after.incomplete)
 }
+
+@Test func `Codex refreshes appended primary and newly created shadow sessions`() async throws {
+    let fixture = CostHistoryFixture()
+    defer { try? FileManager.default.removeItem(at: fixture.root) }
+    let shadowHome = fixture.root.appendingPathComponent("shadow")
+    let settingsURL = fixture.root.appendingPathComponent(".t3/userdata/settings.json")
+    try FileManager.default.createDirectory(
+        at: settingsURL.deletingLastPathComponent(),
+        withIntermediateDirectories: true)
+    let settings: [String: Any] = [
+        "providerInstances": [
+            "codex": [
+                "driver": "codex",
+                "config": [
+                    "homePath": fixture.root.appendingPathComponent(".codex").path,
+                    "shadowHomePath": shadowHome.path,
+                ],
+            ],
+        ],
+    ]
+    try JSONSerialization.data(withJSONObject: settings).write(to: settingsURL)
+    var primaryLines = try [
+        fixture.line("session_meta", ["id": "primary-session"]),
+        fixture.line("turn_context", ["model": "example-model"]),
+        fixture.usage(17, offset: -30),
+    ]
+    try fixture.write(primaryLines, path: ".codex/sessions/2027/01/15/primary.jsonl")
+    let scanner = CodexCostHistory(home: fixture.root)
+    let before = await scanner.records(authFile: fixture.auth, now: fixture.now)
+    #expect(before.records.count == 1)
+    let cacheFile = fixture.root.appendingPathComponent("rates.json")
+    let cache: [String: Any] = [
+        "fetchedAt": fixture.now.timeIntervalSinceReferenceDate,
+        "rates": ["example-model": ["input": 1.0, "output": 2.0, "cacheRead": 0.1, "cacheWrite": 0.2]],
+    ]
+    try JSONSerialization.data(withJSONObject: cache).write(to: cacheFile)
+    let pricing = APICostPricing(cacheFile: cacheFile)
+    let beforeEstimate = await pricing.estimate(
+        records: before.records, incomplete: before.incomplete, now: fixture.now)
+    #expect(try abs(#require(beforeEstimate.usd) - 21.2) < 0.000001)
+    #expect(beforeEstimate.pricedRecords == 1)
+    try primaryLines.append(fixture.usage(23, offset: -10))
+    try fixture.write(primaryLines, path: ".codex/sessions/2027/01/15/primary.jsonl")
+    try fixture.write([
+        fixture.line("session_meta", ["id": "shadow-session"]),
+        fixture.line("turn_context", ["model": "example-model"]),
+        fixture.usage(19, offset: -5),
+    ], path: "shadow/sessions/2027/01/15/shadow.jsonl")
+    let after = await scanner.records(authFile: fixture.auth, now: fixture.now)
+    let afterEstimate = await pricing.estimate(
+        records: after.records, incomplete: after.incomplete, now: fixture.now)
+    #expect(after.records.count == 3)
+    #expect(after.records.reduce(0) { $0 + $1.tokens.input } == 59)
+    #expect(afterEstimate.pricedRecords == 3)
+    #expect(try abs(#require(afterEstimate.usd) - 71.6) < 0.000001)
+    #expect(!afterEstimate.incomplete)
+    let restarted = CodexCostHistory(home: fixture.root)
+    let restored = await restarted.records(authFile: fixture.auth, now: fixture.now)
+    let restoredEstimate = await pricing.estimate(
+        records: restored.records, incomplete: restored.incomplete, now: fixture.now)
+    #expect(restoredEstimate.usd == afterEstimate.usd)
+    let nextWeek = fixture.now.addingTimeInterval(7 * 86400)
+    let weekly = await restarted.records(authFile: fixture.auth, now: nextWeek)
+    #expect(weekly.records.count == 3)
+    let nextMonth = fixture.now.addingTimeInterval(31 * 86400)
+    let expired = await restarted.records(authFile: fixture.auth, now: nextMonth)
+    #expect(expired.records.isEmpty)
+    #expect(expired.retainedRecords == 3)
+}

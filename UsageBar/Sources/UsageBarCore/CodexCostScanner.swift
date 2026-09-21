@@ -12,15 +12,16 @@ struct CodexCostScanner {
 
     func read(
         file: URL, previous: CodexHistoryFile?, size: Int, mtimeMs: Double,
-        budget: inout Int) -> CodexHistoryFile?
+        budget: inout Int, provider: String = "codex")
+        -> CodexHistoryFile?
     {
         do {
             let handle = try FileHandle(forReadingFrom: file)
             defer { try? handle.close() }
             var result = CodexHistoryFile(
-                size: size, mtimeMs: mtimeMs, provider: "codex", records: [], tail: [],
+                size: size, mtimeMs: mtimeMs, provider: provider, records: [], tail: [],
                 offset: 0, guardLength: 0, guardHash: 0, state: CodexHistoryState())
-            if let previous, previous.provider == "codex", previous.state != nil,
+            if let previous, previous.provider == provider, previous.state != nil,
                size > previous.size || previous.pendingScan, size >= previous.offset,
                previous.offset > 0, previous.guardLength > 0,
                try self.guardMatches(handle, previous)
@@ -52,9 +53,12 @@ struct CodexCostScanner {
                     budget -= chunk.count
                     pending.append(chunk)
                     while let newline = pending.firstIndex(of: 10) {
-                        if !discarding,
-                           let event = self
-                               .consume(pending[..<newline], state: &state, incomplete: &result.incomplete)
+                        if !discarding, let event = self
+                            .consume(
+                                pending[..<newline],
+                                state: &state,
+                                incomplete: &result.incomplete,
+                                provider: provider)
                         {
                             result.records.append(event)
                         }
@@ -76,7 +80,12 @@ struct CodexCostScanner {
             if !result.pendingScan, !discarding, !pending.isEmpty {
                 var tailState = state
                 var tailIncomplete = false
-                if let event = self.consume(pending, state: &tailState, incomplete: &tailIncomplete) {
+                if let event = self.consume(
+                    pending,
+                    state: &tailState,
+                    incomplete: &tailIncomplete,
+                    provider: provider)
+                {
                     result.tail = [event]
                 }
                 // An unfinished trailing JSON object is normal for an active writer. It is reread next time.
@@ -104,7 +113,13 @@ struct CodexCostScanner {
         return value
     }
 
-    private func consume(_ line: Data, state: inout CodexHistoryState, incomplete: inout Bool) -> CodexHistoryEvent? {
+    private func consume(
+        _ line: Data,
+        state: inout CodexHistoryState,
+        incomplete: inout Bool,
+        provider: String) -> CodexHistoryEvent?
+    {
+        if provider == "omp" { return self.consumeOMP(line, state: &state, incomplete: &incomplete) }
         guard Self.markers.contains(where: { line.range(of: $0) != nil }) else { return nil }
         guard let object = try? JSONSerialization.jsonObject(with: line) as? [String: Any],
               let payload = object["payload"] as? [String: Any] else { incomplete = true; return nil }
@@ -156,6 +171,64 @@ struct CodexCostScanner {
             timestampMs: milliseconds, model: state.model, sessionID: state.sessionId,
             tokens: APICostTokens(input: inclusive, cachedInput: cached, cacheWrite: written, output: output),
             reasoning: min(reasoning, output), dedupeKey: nil, reportedCost: nil)
+    }
+
+    private func consumeOMP(
+        _ line: Data,
+        state: inout CodexHistoryState,
+        incomplete: inout Bool) -> CodexHistoryEvent?
+    {
+        guard let object = try? JSONSerialization.jsonObject(with: line) as? [String: Any] else {
+            if !line.allSatisfy({ $0 == 32 || $0 == 9 || $0 == 13 }) { incomplete = true }
+            return nil
+        }
+        if object["type"] as? String == "session" {
+            state.sessionId = object["id"] as? String ?? ""
+            return nil
+        }
+        guard object["type"] as? String == "message",
+              let message = object["message"] as? [String: Any],
+              message["role"] as? String == "assistant" else { return nil }
+        guard let provider = message["provider"] as? String else { incomplete = true; return nil }
+        guard provider == "openai-codex" || provider == "openai" else { return nil }
+        guard let usage = message["usage"] as? [String: Any],
+              let input = Self.number(usage["input"]),
+              let output = Self.number(usage["output"]),
+              let cached = Self.number(usage["cacheRead"] ?? 0),
+              let written = Self.number(usage["cacheWrite"] ?? 0),
+              let model = message["model"] as? String, !model.isEmpty
+        else { incomplete = true; return nil }
+        let timestamp = Self.number(message["timestamp"])
+            ?? self.date(message["timestamp"]).map { $0.timeIntervalSince1970 * 1000 }
+            ?? self.date(object["timestamp"]).map { $0.timeIntervalSince1970 * 1000 }
+        guard let milliseconds = timestamp, milliseconds.isFinite, milliseconds > 0 else {
+            incomplete = true
+            return nil
+        }
+        let inclusive = input + cached + written
+        guard inclusive.isFinite else { incomplete = true; return nil }
+        guard inclusive > 0 || output > 0 else { return nil }
+        let identity: String
+        if let response = message["responseId"] as? String, !response.isEmpty {
+            identity = "omp:response:\(response)"
+        } else {
+            guard let id = object["id"] as? String, !id.isEmpty else { incomplete = true; return nil }
+            // Forks retain message IDs; timestamps and usage prevent unrelated short IDs from colliding.
+            identity = [
+                "omp:message",
+                id,
+                String(milliseconds),
+                model,
+                String(input),
+                String(cached),
+                String(written),
+                String(output),
+            ].joined(separator: "|")
+        }
+        return CodexHistoryEvent(
+            timestampMs: milliseconds, model: model, sessionID: state.sessionId,
+            tokens: APICostTokens(input: inclusive, cachedInput: cached, cacheWrite: written, output: output),
+            reasoning: 0, dedupeKey: identity, reportedCost: nil)
     }
 
     private static func number(_ value: Any?) -> Double? {

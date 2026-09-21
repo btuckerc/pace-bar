@@ -109,10 +109,16 @@ struct Dashboard: View {
 
             if self.store.codex.isEmpty { Text("—").foregroundStyle(.secondary) }
             VStack(alignment: .leading, spacing: 4) {
-                PrivateCostMetric(
-                    title: "API equivalent · 30d",
-                    amount: self.store.codexCost?.usd,
-                    explanation: self.codexCostHelp)
+                HStack(spacing: 12) {
+                    PrivateCostMetric(
+                        title: "API equivalent · 7d",
+                        amount: self.store.codexCost?.weekUSD,
+                        explanation: self.codexCostHelp)
+                    PrivateCostMetric(
+                        title: "API equivalent · 30d",
+                        amount: self.store.codexCost?.usd,
+                        explanation: self.codexCostHelp)
+                }
                 Text("* Not billed spend")
                     .font(.system(size: 10)).foregroundStyle(.secondary)
                     .help(self.codexCostHelp)
@@ -121,12 +127,16 @@ struct Dashboard: View {
     }
 
     private var codexCostHelp: String {
-        var text = "Estimated API price of locally recorded Codex tokens for today and the preceding 29 calendar days, "
-            + "matching T3's 30-day window in this Mac's time zone. Across local Codex homes, not per subscription account. "
-            + "T3's retained local history is imported automatically and preserved independently of its original logs. "
-            + "Not your bill, subscription fee, savings, or a forecast. Other machines are not included unless their "
-            + "usage is present locally; compare T3 with the same environment selection. "
-            + "Input and cache are priced separately; reasoning is already in output. Base rates are not an invoice."
+        var text = "Estimated API price of locally recorded OpenAI/Codex usage from Codex, OMP, and Pi. "
+            + "The 7-day and 30-day windows include today and the preceding 6 or 29 calendar days in this Mac's time zone. "
+            + "Usage Bar reads usage and calculates costs independently; T3 does not need to be running. "
+            + "Across local sessions, not per subscription account. Other machines and non-OpenAI providers are excluded. "
+            + "Not your bill, subscription fee, savings, or a forecast. "
+            + "Input and cache are priced separately; reasoning is already in output. Base rates are not an invoice. "
+            + "Local usage refreshes every minute, or every five minutes when power or thermal limits apply."
+        if let updated = self.store.updated["Codex cost"] {
+            text += " Usage checked \(updated.formatted(date: .omitted, time: .standard))."
+        }
         if let cost = self.store.codexCost {
             if cost.unpricedRecords > 0 {
                 text += " \(cost.unpricedRecords) usage records have no known price and are excluded."
@@ -137,7 +147,6 @@ struct Dashboard: View {
                 text += " LiteLLM pricing catalog fetched \(date.formatted(date: .abbreviated, time: .omitted))."
                 if Date().timeIntervalSince(date) > 86400 { text += " Cached rates may be out of date." }
             }
-            if cost.usesT3Pricing { text += " Uses T3's saved pricing catalog and custom price overrides." }
             if cost.usd == nil { text += " No priceable local usage is available; — does not mean zero cost." }
         }
         return text

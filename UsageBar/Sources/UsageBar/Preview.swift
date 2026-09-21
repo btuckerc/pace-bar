@@ -20,7 +20,8 @@ enum Preview {
                 error: nil)
         }
         store.codexCost = APICostEstimate(
-            usd: 1234.56, unpricedRecords: 0, pricedRecords: 240, incomplete: false, ratesUpdated: Date())
+            usd: 1234.56, unpricedRecords: 0, pricedRecords: 240, incomplete: false,
+            ratesUpdated: Date(), weekUSD: 345.67)
         store.router = try UsageParser.openRouter(
             key: Data("{\"data\":{\"usage_daily\":0.1,\"usage_weekly\":1.2,\"usage_monthly\":3.4}}".utf8),
             credits: Data("{\"data\":{\"total_credits\":40,\"total_usage\":7.32}}".utf8), warning: nil)
