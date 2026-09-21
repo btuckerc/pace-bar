@@ -1,5 +1,10 @@
 # Changelog
 
+## Usage Bar 0.2.3
+
+- Distribute the standalone Apple Silicon app as a Developer ID–signed, Apple-notarized ZIP with a stapled ticket, checksums, and source-commit metadata.
+- Add a macOS application icon based on the four-arc Orbit menu-bar mark.
+
 ## 0.62.1 — Unreleased
 
 ### Added

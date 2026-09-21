@@ -10,6 +10,8 @@ The 18-point menu glyph is an Orbit of four separated rounded arc segments aroun
 
 We compared [three icon directions](images/icon-study.png) at menu-bar size: upright meters, interrupted horizontal rails, and separated arcs. The selected Orbit uses the separated arcs because it keeps four account values distinct while remaining a compact, quiet menu-bar mark.
 
+The application bundle icon uses the same four 65-degree arcs and 25-degree gaps as Orbit, with a static mint mark on a dark teal rounded tile. It is identity artwork, not a quota reading. `scripts/make-icon.swift` renders all standard 1×/2× icon sizes through 1024 pixels; the packager generates `UsageBar.icns` and declares `CFBundleIconFile` before signing. Both development and Developer ID release builds include it.
+
 Design references: Apple's [interface icon guidance](https://developer.apple.com/design/human-interface-guidelines/icons) supports simplified shapes, consistent stroke weight, and optical alignment. Its [chart guidance](https://developer.apple.com/design/human-interface-guidelines/charts) informed retaining explicit numeric values and context alongside meters. The implementation uses small native geometry instead of a chart framework. Account handling was informed by [CodexBar's account-scoping design](https://github.com/steipete/CodexBar/blob/main/docs/codex.md).
 
 ## Accounts and data fidelity
