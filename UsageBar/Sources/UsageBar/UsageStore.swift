@@ -47,9 +47,12 @@ final class UsageStore {
     var quotaIconState: QuotaIconState {
         QuotaIconState(
             readings: self.codex,
+            claude: self.claude,
             now: Date(),
             freshness: self.constrained ? 1800 : 600,
-            unavailable: self.paused || self.sleeping || self.settingsError != nil || self.errors["Codex"] != nil)
+            unavailable: self.paused || self.sleeping || self.settingsError != nil,
+            codexUnavailable: self.errors["Codex"] != nil,
+            claudeUnavailable: self.errors["Claude"] != nil)
     }
 
     func start() {
@@ -123,7 +126,7 @@ final class UsageStore {
                 if generation == self.generation {
                     self.tasks.removeValue(forKey: provider)
                     self.refreshing.remove(provider)
-                    if provider == "Codex" { self.iconNeedsUpdate?() }
+                    if provider == "Codex" || provider == "Claude" { self.iconNeedsUpdate?() }
                 }
             }
             do {
@@ -225,12 +228,7 @@ final class UsageStore {
     }
 
     func apply(_ config: Configuration) throws {
-        try config.validate()
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        try FileManager.default.createDirectory(
-            at: Configuration.file.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try encoder.encode(config).write(to: Configuration.file, options: .atomic)
+        try Self.save(config)
         self.cancelRefreshes()
         self.configuration = config
         self.settingsError = nil
@@ -248,5 +246,23 @@ final class UsageStore {
         self.errors = [:]
         self.attempted = [:]
         self.refresh(force: true)
+    }
+
+    /// Changes only the status-item drawing: no refresh, and readings stay on screen.
+    func setMenuBarIcon(_ style: MenuBarIcon) throws {
+        var config = self.configuration
+        config.menuBarIcon = style
+        try Self.save(config)
+        self.configuration = config
+        self.iconNeedsUpdate?()
+    }
+
+    private static func save(_ config: Configuration) throws {
+        try config.validate()
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        try FileManager.default.createDirectory(
+            at: Configuration.file.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try encoder.encode(config).write(to: Configuration.file, options: .atomic)
     }
 }

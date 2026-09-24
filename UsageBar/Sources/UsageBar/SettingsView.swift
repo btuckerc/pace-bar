@@ -26,6 +26,20 @@ struct SettingsView: View {
                 Toggle("Read host utilization", isOn: self.$draft.hostUtilization)
                 TextField("Electricity $/kWh (optional)", text: self.$electricityRate)
             }
+            Section("Menu bar") {
+                Picker("Menu bar icon", selection: self.$draft.menuBarIcon) {
+                    Text("Bars").tag(MenuBarIcon.bars)
+                    Text("Orbit").tag(MenuBarIcon.orbit)
+                }
+                .onChange(of: self.draft.menuBarIcon) { _, style in
+                    guard style != self.store.configuration.menuBarIcon else { return }
+                    do { try self.store.setMenuBarIcon(style) } catch { self.error = error.localizedDescription }
+                }
+                Text(self.draft.menuBarIcon == .bars
+                    ? "Codex 1–4, then Claude. Taller bars mean more quota left."
+                    : "Codex 1–4 as arcs, clockwise from the top, matching the app icon.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
             Section {
                 Toggle("Launch at login", isOn: self.$launchAtLogin)
                     .onChange(of: self.launchAtLogin) { _, enabled in
@@ -60,7 +74,7 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .frame(width: 520, height: 490)
+        .frame(width: 520, height: 590)
         .onAppear {
             self.draft = self.store.configuration
             self.metricsURL = self.draft.nousMetricsURL ?? ""

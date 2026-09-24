@@ -1,6 +1,6 @@
 # Setup
 
-Open Usage Bar from Applications, click its menu bar icon, then the gear. Settings save to `~/.config/usage-bar/config.json`; this file contains paths and preferences, not credentials. Launch at login is optional.
+Open Usage Bar from Applications, click its menu bar icon, then the gear. Settings save to `~/.config/usage-bar/config.json`; this file contains paths and preferences, not credentials. Launch at login is optional. **Menu bar icon** switches between Bars (Codex 1–4 and Claude) and Orbit (the four Codex arcs of the app icon).
 
 ## Codex
 

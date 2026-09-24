@@ -291,6 +291,7 @@ private func json(_ text: String) -> Data { Data(text.utf8) }
     var config = try JSONDecoder().decode(Configuration.self, from: old)
     #expect(config.nousMetricsURL == nil)
     #expect(config.electricityUSDPerKWh == nil)
+    #expect(config.menuBarIcon == .bars)
     config.nousMetricsURL = "http://user:secret@host:8082"
     #expect(throws: (any Error).self) { try config.validate() }
     config.nousMetricsURL = "http://host:8082"

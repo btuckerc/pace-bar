@@ -82,6 +82,47 @@ struct QuotaIconStateTests {
         #expect(QuotaIconState(readings: [self.reading("Codex 1", used: [99.99])], now: self.now).levels[0] == 1)
         #expect(QuotaIconState(readings: [self.reading("Codex 1", used: [0])], now: self.now).levels[0] == 12)
     }
+
+    private func claude(
+        _ used: [Double]? = [24, 4],
+        label: String = "Claude 1",
+        updated: TimeInterval = -1800,
+        error: String? = nil) -> ClaudeReading
+    {
+        ClaudeReading(
+            id: label, label: label,
+            windows: used?.enumerated().map { index, value in
+                QuotaWindow(
+                    id: "claude-\(index)", label: "window", periodSeconds: index == 0 ? 604_800 : 18000,
+                    lane: nil, usedPercent: value, resetsAt: self.now.addingTimeInterval(3600))
+            },
+            updated: self.now.addingTimeInterval(updated), error: error)
+    }
+
+    @Test func `Claude shows its binding window and an unused allowance as full`() {
+        #expect(QuotaIconState(readings: [], claude: [self.claude([24, 90])], now: self.now).claude == 2)
+        #expect(QuotaIconState(readings: [], claude: [self.claude([])], now: self.now).claude == 12)
+        #expect(QuotaIconState(readings: [], claude: [self.claude(label: "Claude 2")], now: self.now).claude == nil)
+    }
+
+    @Test func `Claude paced readings stay current for an hour, then become unavailable`() {
+        #expect(QuotaIconState(readings: [], claude: [self.claude(updated: -3600)], now: self.now).claude == 10)
+        #expect(QuotaIconState(readings: [], claude: [self.claude(updated: -3601)], now: self.now).claude == nil)
+        #expect(QuotaIconState(readings: [], claude: [self.claude(error: "offline")], now: self.now).claude == nil)
+        #expect(QuotaIconState(readings: [], claude: [self.claude(nil)], now: self.now).claude == nil)
+    }
+
+    @Test func `A failure of one provider leaves the other provider readable`() {
+        let codex = [self.reading("Codex 1", used: [0])]
+        let claude = [self.claude()]
+        let codexDown = QuotaIconState(readings: codex, claude: claude, now: self.now, codexUnavailable: true)
+        #expect(codexDown.levels == [nil, nil, nil, nil])
+        #expect(codexDown.claude == 10)
+        let claudeDown = QuotaIconState(readings: codex, claude: claude, now: self.now, claudeUnavailable: true)
+        #expect(claudeDown.levels == [12, nil, nil, nil])
+        #expect(claudeDown.claude == nil)
+        #expect(QuotaIconState(readings: codex, claude: claude, now: self.now, unavailable: true) == .unavailable)
+    }
 }
 
 extension CodexReading {

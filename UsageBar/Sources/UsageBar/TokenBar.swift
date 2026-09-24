@@ -24,7 +24,7 @@ struct TokenBar: View {
                     .font(.system(size: 13, weight: .medium)).monospacedDigit()
                 Spacer()
                 if prompt > 0 {
-                    Text("\(Int((parts[0].value / prompt * 100).rounded()))% of input cached")
+                    Text("\(Int((parts[0].value / prompt * 100).rounded()))% cached")
                         .font(.system(size: 11)).foregroundStyle(.secondary)
                 }
             }

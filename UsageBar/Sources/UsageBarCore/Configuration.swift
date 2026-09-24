@@ -1,5 +1,13 @@
 import Foundation
 
+/// How the status item draws quota. Both are template images tinted by the menu bar.
+public enum MenuBarIcon: String, Codable, CaseIterable, Sendable {
+    /// Codex 1–4 as level bars, then a separated Claude bar.
+    case bars
+    /// Codex 1–4 as four separated arcs, matching the app icon.
+    case orbit
+}
+
 public struct Configuration: Codable, Sendable {
     public var codexAuthFile = "~/.codex/auth.json"
     public var openRouterAuthFile = "~/.local/share/opencode/auth.json"
@@ -8,8 +16,22 @@ public struct Configuration: Codable, Sendable {
     public var hostUtilization = true
     public var electricityUSDPerKWh: Double?
     public var nousMetricsURL: String?
+    public var menuBarIcon = MenuBarIcon.bars
 
     public init() {}
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.codexAuthFile = try container.decode(String.self, forKey: .codexAuthFile)
+        self.openRouterAuthFile = try container.decode(String.self, forKey: .openRouterAuthFile)
+        self.nousURL = try container.decode(String.self, forKey: .nousURL)
+        self.nousSSHHost = try container.decode(String.self, forKey: .nousSSHHost)
+        self.hostUtilization = try container.decode(Bool.self, forKey: .hostUtilization)
+        self.electricityUSDPerKWh = try container.decodeIfPresent(Double.self, forKey: .electricityUSDPerKWh)
+        self.nousMetricsURL = try container.decodeIfPresent(String.self, forKey: .nousMetricsURL)
+        // Settings files written before the icon choice existed keep loading with the default.
+        self.menuBarIcon = try container.decodeIfPresent(MenuBarIcon.self, forKey: .menuBarIcon) ?? .bars
+    }
 
     public static var file: URL {
         FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".config/usage-bar/config.json")

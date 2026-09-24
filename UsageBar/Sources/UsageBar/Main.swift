@@ -25,16 +25,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     private let popover = NSPopover()
     private var settingsWindow: NSWindow?
     private var observers: [NSObjectProtocol] = []
-    private var lastIconState: QuotaIconState?
+    private var lastIcon: (state: QuotaIconState, style: MenuBarIcon)?
+    private var dismissalMonitors: [Any] = []
 
     func applicationDidFinishLaunching(_: Notification) {
-        let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+        let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         self.item = item
         self.store.iconNeedsUpdate = { [weak self] in self?.updateIcon() }
         self.updateIcon()
         item.button?.target = self
         item.button?.action = #selector(self.togglePopover)
-        self.popover.behavior = .transient
+        // Own dismissal: a transient popover can close on the status button's mouse-down (after its content
+        // resizes, e.g. revealing a cost), and the button's mouse-up action would then reopen it.
+        self.popover.behavior = .applicationDefined
         self.popover.animates = false
         self.popover.delegate = self
         self.store.start()
@@ -54,14 +57,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
 
     private func updateIcon() {
         let state = self.store.quotaIconState
+        let style = self.store.configuration.menuBarIcon
         guard let button = self.item?.button else { return }
-        if state != self.lastIconState {
-            self.lastIconState = state
-            button.image = UsageIcon.image(levels: state.levels)
-        }
-        let values = zip(QuotaIconState.labels, state.levels).map { label, level in
-            let remaining = self.store.codex.first { $0.label == label }?.snapshot?.windows
-                .filter { $0.lane == nil }.map(\.remainingPercent).min()
+        func describe(_ label: String, level: Int?, remaining: Double?) -> String {
             let value: String = if level != nil, let remaining {
                 remaining == 0 ? "exhausted"
                     : remaining < 0.1 ? "<0.1% left"
@@ -71,9 +69,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             }
             return "\(label): \(value)"
         }
-        let description = "Usage Bar — Codex remaining\n" + values.joined(separator: "\n")
+        var values = zip(QuotaIconState.labels, state.levels).map { label, level in
+            describe(
+                label,
+                level: level,
+                remaining: self.store.codex.first { $0.label == label }?.snapshot?.windows
+                    .filter { $0.lane == nil }.map(\.remainingPercent).min())
+        }
+        if style == .bars {
+            let claude = self.store.claude.first { $0.label == QuotaIconState.claudeLabel }
+            let remaining = claude?.windows.map { $0.map(\.remainingPercent).min() ?? 100 }
+            values.append(describe(QuotaIconState.claudeLabel, level: state.claude, remaining: remaining))
+        }
+        let description = "Usage Bar — quota remaining\n" + values.joined(separator: "\n")
         // Keep spoken/hover values accurate even when a change is too small to move a pixel.
-        if button.toolTip != description {
+        let redraw = self.lastIcon?.state != state || self.lastIcon?.style != style
+        if redraw {
+            self.lastIcon = (state, style)
+            button.image = UsageIcon.image(state, style: style)
+        }
+        if redraw || button.toolTip != description {
             button.image?.accessibilityDescription = description
             button.setAccessibilityLabel(description)
             button.toolTip = description
@@ -94,11 +109,48 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         self.popover.contentSize = hosting.view.fittingSize
         self.popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
         self.popover.contentViewController?.view.window?.makeKey()
+        self.installDismissal()
     }
 
     func popoverDidClose(_: Notification) {
+        for monitor in self.dismissalMonitors {
+            NSEvent.removeMonitor(monitor)
+        }
+        self.dismissalMonitors = []
         // Release the SwiftUI tree between visits; data stays in the small store.
         self.popover.contentViewController = nil
+    }
+
+    /// Closes on Escape and on clicks anywhere except the popover and the status button, which toggles.
+    private func installDismissal() {
+        guard self.dismissalMonitors.isEmpty else { return }
+        let local = NSEvent.addLocalMonitorForEvents(
+            matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown, .keyDown])
+        { [weak self] event in
+            guard let self, self.popover.isShown else { return event }
+            if event.type == .keyDown {
+                guard event.keyCode == 53 else { return event }
+                self.popover.performClose(nil)
+                return nil
+            }
+            if event.window !== self.popover.contentViewController?.view.window, !self.pointerIsOverStatusItem {
+                self.popover.performClose(nil)
+            }
+            return event
+        }
+        let global = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown])
+            { [weak self] _ in
+                MainActor.assumeIsolated {
+                    guard let self, !self.pointerIsOverStatusItem else { return }
+                    self.popover.performClose(nil)
+                }
+            }
+        self.dismissalMonitors = [local, global].compactMap(\.self)
+    }
+
+    private var pointerIsOverStatusItem: Bool {
+        guard let button = self.item?.button, let window = button.window else { return false }
+        return window.convertToScreen(button.convert(button.bounds, to: nil)).contains(NSEvent.mouseLocation)
     }
 
     private func showSettings() {

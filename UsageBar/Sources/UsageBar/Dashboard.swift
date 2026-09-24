@@ -263,7 +263,7 @@ struct Dashboard: View {
                     Spacer()
                     if let rate = self.store.configuration.electricityUSDPerKWh {
                         PrivateCostMetric(
-                            title: "GPU cost", amount: self.store.gpuEnergy.cost(rate: rate),
+                            title: "Cost", amount: self.store.gpuEnergy.cost(rate: rate),
                             explanation: "Recorded GPU energy × \(self.money(rate))/kWh", inline: true)
                     }
                     self.status("Host")

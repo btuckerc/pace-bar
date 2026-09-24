@@ -45,7 +45,7 @@ Distribution is through **GitHub Releases, not the Mac App Store**. [Apple Devel
 ```sh
 python3 ../mac-releases/release.py --help
 python3 ../mac-releases/release.py build usage-bar \
-  --version 0.3.0 --build-number 8 --identity "Developer ID Application: Your Name (TEAMID)"
+  --version 0.3.1 --build-number 9 --identity "Developer ID Application: Your Name (TEAMID)"
 ```
 
 The sibling `mac-releases` checkout provides the shared Apple-toolchain release pipeline for all four apps. One-time setup: create/import a **Developer ID Application** certificate and its private key in macOS Keychain, then run `xcrun notarytool store-credentials mac-releases` interactively. Keep credentials and certificate exports outside Git. Apple Development and ad-hoc identities cannot produce public releases.
@@ -54,7 +54,7 @@ The workflow is `build` → `notarize` → `verify` → `draft` → `publish`. B
 
 Before a draft upload, explicitly create and push the intended `usage-bar-vVERSION` tag at the built commit. This preserves Usage Bar's existing namespace without colliding with inherited CodexBar `vVERSION` tags. Draft/publish require `--confirm btuckerc/usage-bar@usage-bar-vVERSION`; publishing downloads and verifies the draft assets before making them public. The tool never commits, pushes, creates tags, or publishes as a side effect of building. Historical releases and their assets are left unchanged.
 
-For build-only integration, use `python3 UsageBar/scripts/build-release.py --release --identity ... --version X.Y.Z --build-number N --output /absolute/path/UsageBar.app`. Release output must be new and does not replace the development bundle. Both modes generate the app icon from `UsageBar/scripts/make-icon.swift`: the menu-bar Orbit's four arcs, rendered as a static mint mark on a dark teal macOS tile. The menu-bar icon remains live and unchanged.
+For build-only integration, use `python3 UsageBar/scripts/build-release.py --release --identity ... --version X.Y.Z --build-number N --output /absolute/path/UsageBar.app`. Release output must be new and does not replace the development bundle. Both modes generate the app icon from `UsageBar/scripts/make-icon.swift`: the menu-bar Orbit's four arcs, rendered as a static mint mark on a dark teal macOS tile. The live menu-bar icon is drawn at runtime, as level bars by default or as Orbit when selected in Settings.
 
 ## A few details
 

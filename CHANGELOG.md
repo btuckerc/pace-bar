@@ -1,5 +1,12 @@
 # Changelog
 
+## Usage Bar 0.3.1
+
+- Make five level bars the default menu-bar icon (Codex 1–4, then Claude 1 in its own slot); the four-arc Orbit remains selectable under Settings › Menu bar icon and switches without refreshing.
+- Keep the other provider readable in the menu-bar icon when Codex or Claude is unavailable.
+- Shorten nous labels to **Cost** and **86% cached**.
+- Close the panel with one click on the menu-bar icon after revealing a cost; it previously closed and immediately reopened.
+
 ## Usage Bar 0.3.0
 
 - Retain cumulative GPU energy and counter baselines in existing per-host history across app restarts and observed driver/host resets; avoid double-counting replayed AMD checkpoints and overlapping collection methods.
