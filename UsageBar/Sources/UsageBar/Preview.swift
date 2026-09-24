@@ -14,7 +14,7 @@ enum Preview {
         store.codex = (1...4).map {
             CodexReading(
                 id: "fixture-\($0)",
-                label: ["primary", "secondary", "last", "btc"][$0 - 1],
+                label: CodexAccount.labels[$0 - 1],
                 snapshot: snapshot,
                 updated: Date(),
                 error: nil)
@@ -22,6 +22,18 @@ enum Preview {
         store.codexCost = APICostEstimate(
             usd: 1234.56, unpricedRecords: 0, pricedRecords: 240, incomplete: false,
             ratesUpdated: Date(), weekUSD: 345.67)
+        let resets = [Date().addingTimeInterval(9000), Date().addingTimeInterval(345_600)]
+            .map { ISO8601DateFormatter().string(from: $0) }
+        store.claude = try [ClaudeReading(
+            id: "fixture-claude", label: "Claude 1",
+            windows: UsageParser.claude(Data("""
+            {"five_hour":{"utilization":12,"resets_at":"\(resets[0])"},
+            "seven_day":{"utilization":31,"resets_at":"\(resets[1])"}}
+            """.utf8)),
+            updated: Date(), error: nil)]
+        store.claudeCost = APICostEstimate(
+            usd: 210.4, unpricedRecords: 0, pricedRecords: 80, incomplete: false,
+            ratesUpdated: Date(), weekUSD: 98.1)
         store.router = try UsageParser.openRouter(
             key: Data("{\"data\":{\"usage_daily\":0.1,\"usage_weekly\":1.2,\"usage_monthly\":3.4}}".utf8),
             credits: Data("{\"data\":{\"total_credits\":40,\"total_usage\":7.32}}".utf8), warning: nil)
@@ -41,8 +53,8 @@ enum Preview {
         """)
         store.cpuPercent = 8.4
         store.configuration.electricityUSDPerKWh = 0.15
-        store.gpuEnergy.record(millijoules: 1000, uptime: 1000)
-        store.gpuEnergy.record(millijoules: 360_001_000, uptime: 4600)
+        try store.gpuEnergy.record(UsageParser.host("GPU 12, 6246, 10240, 27.2\nENERGY 1000 1000"))
+        try store.gpuEnergy.record(UsageParser.host("GPU 12, 6246, 10240, 27.2\nENERGY 360001000 4600"))
         store.codex[2].snapshot = try UsageParser.codex(Data("""
         {"plan_type":"pro","rate_limit_reset_credits":{"available_count":0},"rate_limit":{"primary_window":{
         "used_percent":100,"reset_at":\(Int(Date().timeIntervalSince1970 + 28800)),"limit_window_seconds":604800}},

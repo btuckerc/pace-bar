@@ -10,7 +10,7 @@ enum UsageIcon {
             let radius = CGFloat(6)
             let strokeWidth = CGFloat(2.1)
             let segmentSpan = CGFloat(65)
-            let starts: [CGFloat] = [122.5, 32.5, -57.5, 212.5] // primary, secondary, last, btc; clockwise from top
+            let starts: [CGFloat] = [122.5, 32.5, -57.5, 212.5] // Codex 1-4, clockwise from top
 
             for index in 0..<4 {
                 let start = starts[index]

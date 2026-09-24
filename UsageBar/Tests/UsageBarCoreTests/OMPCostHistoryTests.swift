@@ -133,14 +133,60 @@ private struct OMPCostFixture {
     try fixture.write([
         message,
         fixture.message("shared", provider: "openai", offset: -10, messageTime: false),
-        fixture.message("excluded-anthropic", provider: "anthropic"),
+        fixture.message("anthropic", provider: "anthropic"),
         fixture.message("excluded-router", provider: "openrouter"),
         fixture.message("excluded-local", provider: "llama.cpp"),
     ].joined(separator: "\n") + "\n", path: ".pi/agent/sessions/project/main.jsonl")
     let result = await CodexCostHistory(home: fixture.home).records(authFile: fixture.auth, now: fixture.now)
-    #expect(result.records.count == 2)
-    #expect(result.records.reduce(0) { $0 + $1.tokens.input } == 70)
+    let openAI = result.records.filter { $0.vendor == .openAI }
+    #expect(openAI.count == 2)
+    #expect(openAI.reduce(0) { $0 + $1.tokens.input } == 70)
+    #expect(result.records.count == 3)
     #expect(!result.incomplete)
+}
+
+@Test func `OMP Anthropic usage survives restarts and prices one hour cache writes at twice input`() async throws {
+    let fixture = OMPCostFixture()
+    defer { try? FileManager.default.removeItem(at: fixture.home) }
+    let row: [String: Any] = [
+        "type": "message", "id": "claude",
+        "message": [
+            "role": "assistant", "provider": "anthropic", "model": "example-model", "responseId": "msg_1",
+            "timestamp": fixture.now.timeIntervalSince1970 * 1000,
+            "usage": ["input": 4, "output": 1, "cacheRead": 10, "cacheWrite": 6, "cttl": ["ephemeral1h": 4]],
+        ] as [String: Any],
+    ]
+    let line = try #require(String(data: JSONSerialization.data(withJSONObject: row), encoding: .utf8))
+    try fixture.write(line + "\n")
+    _ = await CodexCostHistory(home: fixture.home).records(authFile: fixture.auth, now: fixture.now)
+    let restored = await CodexCostHistory(home: fixture.home).records(authFile: fixture.auth, now: fixture.now)
+    let record = try #require(restored.records.first)
+    #expect(record.vendor == .anthropic)
+    #expect(record.tokens.cacheWriteLong == 4)
+    // 4 input + 10 cache reads x 0.1 + 2 short writes x 0.2 + 4 long writes x 2 + 1 output x 2.
+    let cost = try await fixture.pricing().estimate(records: restored.records, incomplete: false, now: fixture.now)
+    #expect(abs((cost.usd ?? 0) - 15.4) < 1e-9)
+}
+
+@Test func `OMP files scanned before Anthropic support are rescanned once`() async throws {
+    let fixture = OMPCostFixture()
+    defer { try? FileManager.default.removeItem(at: fixture.home) }
+    try fixture.write([
+        fixture.message("openai"),
+        fixture.message("anthropic", provider: "anthropic"),
+    ].joined(separator: "\n") + "\n")
+    let archiveURL = fixture.home.appendingPathComponent(".local/share/usage-bar/codex-cost-history.json")
+    _ = await CodexCostHistory(home: fixture.home).records(authFile: fixture.auth, now: fixture.now)
+    // Recreate the pre-upgrade archive: same checkpoint, OpenAI rows only, no scan version.
+    var archive = try CodexHistoryArchive.read(archiveURL)
+    for (path, var file) in archive.files {
+        file.records.removeAll { $0.vendor == .anthropic }
+        file.scanVersion = 1
+        archive.files[path] = file
+    }
+    try archive.write(to: archiveURL)
+    let upgraded = await CodexCostHistory(home: fixture.home).records(authFile: fixture.auth, now: fixture.now)
+    #expect(upgraded.records.map(\.vendor.rawValue).sorted() == ["anthropic", "openai"])
 }
 
 @Test func `Missing OMP usage is unavailable while real usage on failed responses is retained`() async throws {

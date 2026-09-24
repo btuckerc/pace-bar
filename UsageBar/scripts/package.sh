@@ -6,8 +6,8 @@ cd "$SCRIPT_DIR/.."
 
 MODE=development
 IDENTITY=
-VERSION=0.2.3
-BUILD_NUMBER=7
+VERSION=0.3.0
+BUILD_NUMBER=8
 APP="$PWD/dist/Usage Bar.app"
 
 if [[ $# -gt 0 ]]; then
@@ -64,8 +64,8 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 <key>CFBundleExecutable</key><string>UsageBar</string>
 <key>CFBundleIconFile</key><string>UsageBar</string>
 <key>CFBundlePackageType</key><string>APPL</string>
-<key>CFBundleShortVersionString</key><string>0.2.3</string>
-<key>CFBundleVersion</key><string>7</string>
+<key>CFBundleShortVersionString</key><string>0.3.0</string>
+<key>CFBundleVersion</key><string>8</string>
 <key>LSMinimumSystemVersion</key><string>14.0</string>
 <key>LSUIElement</key><true/>
 <key>NSHighResolutionCapable</key><true/>

@@ -28,46 +28,46 @@ struct QuotaIconStateTests {
 
     @Test func `Slots stay attached to fixed account aliases`() {
         let state = QuotaIconState(readings: [
-            self.reading("btc", used: [50]), self.reading("primary", used: [0]),
+            self.reading("Codex 4", used: [50]), self.reading("Codex 1", used: [0]),
         ], now: self.now)
         #expect(state.levels == [12, nil, nil, 6])
     }
 
     @Test func `Missing and ambiguous accounts remain unknown`() {
-        let duplicateID = [self.reading("primary", id: "same"), self.reading("secondary", id: "same")]
+        let duplicateID = [self.reading("Codex 1", id: "same"), self.reading("Codex 2", id: "same")]
         #expect(QuotaIconState(readings: duplicateID, now: self.now) == .unavailable)
 
-        let duplicateLabel = [self.reading("primary", id: "a"), self.reading("primary", id: "b")]
+        let duplicateLabel = [self.reading("Codex 1", id: "a"), self.reading("Codex 1", id: "b")]
         #expect(QuotaIconState(readings: duplicateLabel, now: self.now) == .unavailable)
 
         let unknownLabel = [self.reading("other")]
         #expect(QuotaIconState(readings: unknownLabel, now: self.now) == .unavailable)
 
-        let missing = QuotaIconState(readings: [self.reading("primary")], now: self.now)
+        let missing = QuotaIconState(readings: [self.reading("Codex 1")], now: self.now)
         #expect(missing.levels == [9, nil, nil, nil])
     }
 
     @Test func `Stale failed and reset readings never become a balance`() {
         #expect(QuotaIconState(
-            readings: [self.reading("primary", updated: self.now.addingTimeInterval(-601))], now: self.now)
+            readings: [self.reading("Codex 1", updated: self.now.addingTimeInterval(-601))], now: self.now)
             .levels == [nil, nil, nil, nil])
         #expect(QuotaIconState(
-            readings: [self.reading("primary", updated: self.now.addingTimeInterval(1))], now: self.now)
+            readings: [self.reading("Codex 1", updated: self.now.addingTimeInterval(1))], now: self.now)
             .levels == [nil, nil, nil, nil])
         #expect(QuotaIconState(
-            readings: [self.reading("primary", error: "offline")], now: self.now)
+            readings: [self.reading("Codex 1", error: "offline")], now: self.now)
             .levels == [nil, nil, nil, nil])
         #expect(QuotaIconState(
-            readings: [self.reading("primary", resetOffset: 0)], now: self.now)
+            readings: [self.reading("Codex 1", resetOffset: 0)], now: self.now)
             .levels == [nil, nil, nil, nil])
         #expect(QuotaIconState(
-            readings: [self.reading("primary", additional: true)], now: self.now)
+            readings: [self.reading("Codex 1", additional: true)], now: self.now)
             .levels == [nil, nil, nil, nil])
     }
 
     @Test func `The binding ordinary quota excludes model-specific allowances`() {
         let state = QuotaIconState(readings: [
-            self.reading("primary", used: [25, 75])
+            self.reading("Codex 1", used: [25, 75])
                 .addingAdditionalWindow(used: 100, now: self.now),
         ], now: self.now)
         #expect(state.levels == [3, nil, nil, nil])
@@ -75,12 +75,12 @@ struct QuotaIconStateTests {
 
     @Test func `Invalid percentages stay unknown and positive quotas differ from zero`() {
         for used: Double in [-1, 101, .infinity, -.infinity, .nan] {
-            #expect(QuotaIconState(readings: [self.reading("primary", used: [used])], now: self.now)
+            #expect(QuotaIconState(readings: [self.reading("Codex 1", used: [used])], now: self.now)
                 .levels == [nil, nil, nil, nil])
         }
-        #expect(QuotaIconState(readings: [self.reading("primary", used: [100])], now: self.now).levels[0] == 0)
-        #expect(QuotaIconState(readings: [self.reading("primary", used: [99.99])], now: self.now).levels[0] == 1)
-        #expect(QuotaIconState(readings: [self.reading("primary", used: [0])], now: self.now).levels[0] == 12)
+        #expect(QuotaIconState(readings: [self.reading("Codex 1", used: [100])], now: self.now).levels[0] == 0)
+        #expect(QuotaIconState(readings: [self.reading("Codex 1", used: [99.99])], now: self.now).levels[0] == 1)
+        #expect(QuotaIconState(readings: [self.reading("Codex 1", used: [0])], now: self.now).levels[0] == 12)
     }
 }
 

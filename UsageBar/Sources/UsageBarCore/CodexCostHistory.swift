@@ -46,7 +46,8 @@ public actor CodexCostHistory {
             let milliseconds = source.modified.timeIntervalSince1970 * 1000
             let cached = self.archive.files[file.path]
             if let cached, cached.provider == source.provider, cached.size == size,
-               abs(cached.mtimeMs - milliseconds) < 0.01, !cached.pendingScan
+               abs(cached.mtimeMs - milliseconds) < 0.01, !cached.pendingScan,
+               cached.scanVersion == CodexCostScanner.version(for: source.provider)
             {
                 incomplete = incomplete || cached.incomplete
                 continue
@@ -93,7 +94,8 @@ public actor CodexCostHistory {
                 guard seen.insert(identity).inserted else { continue }
                 let date = Date(timeIntervalSince1970: event.timestampMs / 1000)
                 if window.contains(date) {
-                    output.append(APICostRecord(id: identity, date: date, model: event.model, tokens: tokens))
+                    output.append(APICostRecord(
+                        id: identity, date: date, model: event.model, tokens: tokens, vendor: event.vendor))
                 }
             }
         }

@@ -1,5 +1,18 @@
 # Changelog
 
+## Usage Bar 0.3.0
+
+- Retain cumulative GPU energy and counter baselines in existing per-host history across app restarts and observed driver/host resets; avoid double-counting replayed AMD checkpoints and overlapping collection methods.
+- Restore AMD GPU/VRAM/power telemetry, retry unavailable GPU discovery after startup, and retain clearly labeled sampled-energy/cost estimates across restarts without restarting inference.
+- Format Output, Input, and Cache token totals with compact K/M/B/T notation while retaining full-precision counters.
+- Rename the Codex section to Frontier and its accounts to Codex 1–4, and add Claude subscription rows (5-hour and weekly quota) from OMP's Anthropic sign-in.
+- Add separate Claude API-equivalent 7-day and 30-day estimates from OMP/Pi Anthropic usage, pricing one-hour cache writes at 2x input; previously scanned OMP sessions are rescanned once to recover it.
+- Show each Frontier subscription as a ring (Claude nests its 5-hour session inside the weekly allowance) and replace the one-account-at-a-time runway with a pooled Codex forecast that matches OMP's load balancing and flags quota that will reset unused.
+- Combine Codex and Claude into one API-equivalent 7d/30d pair with a revealed two-tone split, redraw nous as utilization rings and a token-composition bar, and shorten every tooltip to what matters.
+- Pace Claude usage requests (reuse OMP's recent reading, honor `Retry-After`, keep the last reading across relaunches) instead of showing rate-limit errors or a blank ring, and give each provider its own color family.
+- Place the Codex pool forecast beside its percentage, reveal both API-equivalent amounts together, and show the not-billed caveat with a split legend only once they are revealed.
+- Add `make -C UsageBar install` to quit the running app, package the current source, replace the installed copy, and relaunch it.
+
 ## Usage Bar 0.2.3
 
 - Distribute the standalone Apple Silicon app as a Developer ID–signed, Apple-notarized ZIP with a stapled ticket, checksums, and source-commit metadata.
@@ -9,8 +22,6 @@
 ## 0.62.1 — Unreleased
 
 ### Fixed
-
-- Standalone Usage Bar: read cumulative GPU energy directly from NVIDIA so Wh and electricity cost survive app restarts without local storage or extra host work; calculate recent average watts from successive hardware readings.
 
 - Codex costs: count only a paginated session's new usage, repairing inflated cached totals while preserving validated historical pricing across appends and interrupted scans (#3753). Thanks @anon5376!
 - Kimi: retain nonzero weekly and five-hour counts when a mixed legacy response includes conflicting zero ratios for the same quota windows (#3755, fixes #3754). Thanks @mudrii!

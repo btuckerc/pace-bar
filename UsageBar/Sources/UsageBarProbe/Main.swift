@@ -13,8 +13,8 @@ struct Probe {
                 return
             }
             let services = Services()
-            if CommandLine.arguments.count == 2, CommandLine.arguments[1] == "--runway" {
-                try await self.showRunway(configuration: config, services: services)
+            if CommandLine.arguments.count == 2, CommandLine.arguments[1] == "--pool" {
+                try await self.showPool(configuration: config, services: services)
                 return
             }
             if CommandLine.arguments.count == 3, CommandLine.arguments[1] == "--import-history" {
@@ -22,7 +22,7 @@ struct Probe {
                 return
             }
             let failures = await withTaskGroup(of: Bool.self, returning: Int.self) { group in
-                for provider in ["Codex", "OpenRouter", "Nous", "Host"] {
+                for provider in ["Codex", "Claude", "OpenRouter", "Nous", "Host"] {
                     group.addTask {
                         do {
                             let detail: String
@@ -34,6 +34,13 @@ struct Probe {
                                     print("Codex account \(index + 1): \(value.windows.count) quota windows")
                                 }
                                 detail = "\(accounts.count) distinct accounts"
+                            case "Claude":
+                                let accounts = try ClaudeAccount.discover()
+                                for account in accounts {
+                                    let windows = try await services.claude(account: account)
+                                    print("\(account.label): \(windows.map(\.compactLabel).joined(separator: ", "))")
+                                }
+                                detail = "\(accounts.count) OMP sign-ins"
                             case "OpenRouter":
                                 let value = try await services.openRouter(config)
                                 detail = "balance=\(value.balance != nil), account spend=\(value.totalSpent != nil)"
@@ -145,7 +152,7 @@ struct Probe {
         }
     }
 
-    private static func showRunway(configuration: Configuration, services: Services) async throws {
+    private static func showPool(configuration: Configuration, services: Services) async throws {
         var readings: [CodexReading] = []
         for account in try CodexAccount.discover(configuration) {
             let snapshot = try await services.codex(account: account)
@@ -157,16 +164,16 @@ struct Probe {
                 error: nil))
         }
         let history = await QuotaHistoryStore().snapshot()
-        let runway = history.runway(readings, now: Date())
-        print("Pooled active days: \(runway.activeDays); daily percentage points: \(runway.dailyConsumption ?? 0)")
-        print(runway.explanation)
+        let pool = history.pool(readings, now: Date())
+        print("Pooled active days: \(pool.activeDays); daily percentage points: \(pool.dailyConsumption ?? 0)")
+        print(pool.explanation)
         print("Available banked resets: " +
             (CodexResetInventory.total(readings, now: Date()).map(String.init) ?? "unknown"))
+        print("Pool remaining: \(pool.remainingPercent.map { String(format: "%.1f%%", $0) } ?? "unknown")")
+        print("Empty at: \(pool.exhaustsAt?.formatted() ?? "not before \(pool.coveredThrough?.formatted() ?? "?")")")
+        print(String(format: "Resets unused: %.1f%% of pool", pool.expiringPercent))
         for reading in readings {
-            guard let entry = runway.entries[reading.id] else { continue }
-            let start = entry.startsAt?.formatted() ?? "later"
-            let end = entry.exhaustsAt?.formatted() ?? "beyond horizon"
-            print("\(reading.label): \(start) → \(end); refills=\(entry.refills); interrupted=\(entry.interrupted)")
+            print("\(reading.label): \(String(format: "%.1f", pool.expiring[reading.id] ?? 0))% resets unused")
         }
     }
 }

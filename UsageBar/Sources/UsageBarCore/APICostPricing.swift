@@ -4,14 +4,26 @@ public struct APICostTokens: Sendable, Equatable {
     public let input: Double
     public let cachedInput: Double
     public let cacheWrite: Double
+    /// The part of `cacheWrite` written with Anthropic's one-hour TTL, billed at twice the base input rate.
+    public let cacheWriteLong: Double
     public let output: Double
 
-    public init(input: Double, cachedInput: Double = 0, cacheWrite: Double = 0, output: Double) {
+    public init(
+        input: Double, cachedInput: Double = 0, cacheWrite: Double = 0, cacheWriteLong: Double = 0,
+        output: Double)
+    {
         self.input = input
         self.cachedInput = cachedInput
         self.cacheWrite = cacheWrite
+        self.cacheWriteLong = cacheWriteLong
         self.output = output
     }
+}
+
+/// The API vendor whose list prices apply. Subscription quotas are tracked separately per vendor.
+public enum APICostVendor: String, Sendable {
+    case openAI = "openai"
+    case anthropic
 }
 
 public struct APICostRecord: Sendable {
@@ -19,12 +31,14 @@ public struct APICostRecord: Sendable {
     public let date: Date
     public let model: String
     public let tokens: APICostTokens
+    public let vendor: APICostVendor
 
-    public init(id: String, date: Date, model: String, tokens: APICostTokens) {
+    public init(id: String, date: Date, model: String, tokens: APICostTokens, vendor: APICostVendor = .openAI) {
         self.id = id
         self.date = date
         self.model = model
         self.tokens = tokens
+        self.vendor = vendor
     }
 }
 
@@ -195,10 +209,13 @@ public actor APICostPricing {
     public static func cost(tokens: APICostTokens, rate: CatalogRate) -> Double? {
         guard self.valid(rate), tokens.input.isFinite, tokens.input >= 0, tokens.output.isFinite, tokens.output >= 0,
               tokens.cachedInput.isFinite, tokens.cachedInput >= 0, tokens.cacheWrite.isFinite, tokens.cacheWrite >= 0,
+              tokens.cacheWriteLong.isFinite, tokens.cacheWriteLong >= 0, tokens.cacheWriteLong <= tokens.cacheWrite,
               tokens.cachedInput + tokens.cacheWrite <= tokens.input else { return nil }
+        // Anthropic bills one-hour cache writes at 2x base input; the catalog's write rate is the 5-minute TTL.
         let result = (tokens.input - tokens.cachedInput - tokens.cacheWrite) * rate.input
             + tokens.cachedInput * (rate.cacheRead ?? rate.input)
-            + tokens.cacheWrite * (rate.cacheWrite ?? rate.input) + tokens.output * rate.output
+            + (tokens.cacheWrite - tokens.cacheWriteLong) * (rate.cacheWrite ?? rate.input)
+            + tokens.cacheWriteLong * 2 * rate.input + tokens.output * rate.output
         return result.isFinite && result >= 0 ? result : nil
     }
 
@@ -207,7 +224,9 @@ public actor APICostPricing {
             .first.map(String.init) ?? ""
         guard !["", "opus", "sonnet", "haiku", "fable", "synthetic", "<synthetic>"].contains(key) else { return nil }
         if let exact = catalog[key] { return exact }
-        let bare: String = if key.hasPrefix("openai/") || key.hasPrefix("openai-codex/") {
+        let bare: String = if key.hasPrefix("openai/") || key.hasPrefix("openai-codex/") || key
+            .hasPrefix("anthropic/")
+        {
             String(key.split(separator: "/", maxSplits: 1).last ?? "")
         } else {
             key

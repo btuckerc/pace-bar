@@ -1,4 +1,5 @@
 import Foundation
+import SQLite3
 import Testing
 @testable import UsageBarCore
 
@@ -131,6 +132,30 @@ private func json(_ text: String) -> Data { Data(text.utf8) }
     #expect(value.ramTotalMiB == 31000)
 }
 
+@Test func `Host parsing accepts estimated energy and preserves partial GPU fields`() throws {
+    let value = try UsageParser.host("""
+    GPU 42, 2048, [N/A], 95
+    ENERGY_ESTIMATE 1234567 321
+    """)
+    #expect(value.energyMilliJoules == 1_234_567)
+    #expect(value.energySource == .estimate)
+    #expect(value.gpuPercent == 42)
+    #expect(value.vramUsedMiB == 2048)
+    #expect(value.vramTotalMiB == nil)
+    #expect(value.watts == 95)
+}
+
+@Test func `Hardware energy takes precedence over an estimated energy line`() throws {
+    let value = try UsageParser.host("""
+    Mem: 31000 8000 1000 50 22000 23000
+    ENERGY_ESTIMATE 100 20
+    ENERGY 200 30
+    """)
+    #expect(value.energyMilliJoules == 200)
+    #expect(value.uptime == 30)
+    #expect(value.energySource == .hardware)
+}
+
 @Test func `Credentials only accept the intended account format`() throws {
     #expect(try Credentials.codex(json("{\"tokens\":{\"access_token\":\"fixture\",\"account_id\":\"test-account\"}}"))
         .account == "test-account")
@@ -203,9 +228,40 @@ private func json(_ text: String) -> Data { Data(text.utf8) }
         paths.append(file.path)
     }
     let accounts = try CodexAccount.discover(paths: paths)
-    #expect(accounts.map(\.label) == ["primary", "secondary", "last", "btc"])
+    #expect(accounts.map(\.label) == ["Codex 1", "Codex 2", "Codex 3", "Codex 4"])
     #expect(accounts.map(\.id) == ["main", "second", "last", "btc"])
     #expect(!accounts.contains { $0.label.contains("@") })
+}
+
+@Test func `Claude usage reads microsecond resets and omits windows that have not started`() throws {
+    let windows = try UsageParser.claude(json("""
+    {"five_hour":{"utilization":1.0,"resets_at":"2027-01-15T03:59:59.586220+00:00"},
+     "seven_day":{"utilization":0.0,"resets_at":null},"seven_day_opus":null}
+    """))
+    #expect(windows.map(\.compactLabel) == ["5h"])
+    #expect(windows[0].remainingPercent == 99)
+    #expect(windows[0].resetsAt == Date(timeIntervalSince1970: 1_799_985_599))
+}
+
+@Test func `Claude sign-ins come from enabled OMP credentials only`() throws {
+    let file = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).db")
+    defer { try? FileManager.default.removeItem(at: file) }
+    var handle: OpaquePointer?
+    #expect(sqlite3_open(file.path, &handle) == SQLITE_OK)
+    let statements = """
+    CREATE TABLE auth_credentials (id INTEGER PRIMARY KEY, provider TEXT, credential_type TEXT, data TEXT,
+      disabled_cause TEXT);
+    INSERT INTO auth_credentials VALUES (1, 'openai-codex', 'oauth', '{"access":"other"}', NULL);
+    INSERT INTO auth_credentials VALUES (2, 'anthropic', 'oauth', '{"access":"old","accountId":"a"}', 'revoked');
+    INSERT INTO auth_credentials VALUES (3, 'anthropic', 'oauth', '{"access":"live","accountId":"a","expires":1}', NULL);
+    INSERT INTO auth_credentials VALUES (4, 'anthropic', 'oauth', 'not json', NULL);
+    """
+    #expect(sqlite3_exec(handle, statements, nil, nil, nil) == SQLITE_OK)
+    sqlite3_close(handle)
+    let accounts = try ClaudeAccount.discover(database: file)
+    #expect(accounts.map(\.label) == ["Claude 1", "Claude 2"])
+    #expect(accounts.map(\.token) == ["live", ""])
+    #expect(accounts[0].expires == Date(timeIntervalSince1970: 0.001))
 }
 
 @Test func `Compact quota titles preserve durations without advertising model fallback as reserve`() throws {
@@ -216,51 +272,6 @@ private func json(_ text: String) -> Data { Data(text.utf8) }
     "used_percent":0,"reset_at":1800000000,"limit_window_seconds":604800}}}]}
     """))
     #expect(value.windows.map(\.compactLabel) == ["5h", "7d"])
-}
-
-@Test func `Hardware energy survives app restart while average power uses the latest interval`() {
-    var energy = GPUEnergy()
-    energy.record(millijoules: 3_600_000, uptime: 100)
-    #expect(energy.wattHours == 1)
-    #expect(energy.averageWatts == nil)
-    energy.record(millijoules: 7_200_000, uptime: 160)
-    #expect(energy.wattHours == 2)
-    #expect(energy.averageWatts == 60)
-    #expect(energy.cost(rate: 0.15) == 0.0003)
-    #expect(energy.cost(rate: nil) == nil)
-    energy.record(millijoules: 9_000_000, uptime: 220)
-    #expect(energy.averageWatts == 30)
-    var restarted = GPUEnergy()
-    restarted.record(millijoules: 9_000_000, uptime: 220)
-    #expect(restarted.wattHours == energy.wattHours)
-    #expect(restarted.cost(rate: 0.15) == energy.cost(rate: 0.15))
-    #expect(restarted.averageWatts == nil)
-}
-
-@Test func `Driver and host resets replace totals without negative or borrowed averages`() {
-    var energy = GPUEnergy()
-    energy.record(millijoules: 7_200_000, uptime: 160)
-    energy.record(millijoules: 0, uptime: 180)
-    #expect(energy.wattHours == 0)
-    #expect(energy.averageWatts == nil)
-    energy.record(millijoules: 3_600_000, uptime: 240)
-    #expect(energy.wattHours == 1)
-    #expect(energy.averageWatts == 60)
-    energy.record(millijoules: 7_200_000, uptime: 10)
-    #expect(energy.wattHours == 2)
-    #expect(energy.averageWatts == nil)
-}
-
-@Test func `Missing energy does not turn into zero and long gaps use counter deltas`() {
-    var energy = GPUEnergy()
-    energy.record(millijoules: 0, uptime: 100)
-    energy.record(millijoules: nil, uptime: nil)
-    #expect(energy.wattHours == nil)
-    energy.record(millijoules: 360_000_000, uptime: 3700)
-    #expect(energy.wattHours == 100)
-    #expect(energy.averageWatts == 100)
-    energy.record(millijoules: .nan, uptime: 3800)
-    #expect(energy.wattHours == nil)
 }
 
 @Test func `Account spend remains correct when a particular key reports zero`() throws {

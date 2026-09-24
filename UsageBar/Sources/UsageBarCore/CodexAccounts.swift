@@ -13,16 +13,19 @@ public struct CodexAccount: Identifiable, Sendable {
         return CodexAccount(id: id, label: "account", token: auth.token)
     }
 
+    /// Display names in display order, keyed by the auth-home aliases main, second, last and btc.
+    public static let labels = ["Codex 1", "Codex 2", "Codex 3", "Codex 4"]
+
     private static func rank(_ label: String) -> Int {
-        ["primary", "secondary", "last", "btc"].firstIndex(of: label) ?? 4
+        self.labels.firstIndex(of: label) ?? self.labels.count
     }
 
     private static func nickname(path: String, primary: Bool) -> String {
-        if primary { return "primary" }
+        if primary { return self.labels[0] }
         switch Configuration.expand(path).deletingLastPathComponent().lastPathComponent {
-        case "second", "secondary": return "secondary"
-        case "last": return "last"
-        case "btc": return "btc"
+        case "second", "secondary": return self.labels[1]
+        case "last": return self.labels[2]
+        case "btc": return self.labels[3]
         default: return "account"
         }
     }

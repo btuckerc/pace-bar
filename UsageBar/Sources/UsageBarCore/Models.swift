@@ -82,6 +82,11 @@ public struct NousSnapshot: Sendable {
     }
 }
 
+public enum HostEnergySource: String, Codable, Sendable, Equatable {
+    case hardware
+    case estimate
+}
+
 public struct HostSnapshot: Sendable {
     public let gpuPercent: Double?
     public let vramUsedMiB: Double?
@@ -92,6 +97,27 @@ public struct HostSnapshot: Sendable {
     public let ramUsedMiB: Double?
     public let ramTotalMiB: Double?
     public let cpu: CPUCounters?
+    public let energySource: HostEnergySource
+    public let energyCounterID: String?
+
+    public init(
+        gpuPercent: Double?, vramUsedMiB: Double?, vramTotalMiB: Double?,
+        energyMilliJoules: Double?, uptime: Double?, watts: Double?,
+        ramUsedMiB: Double?, ramTotalMiB: Double?, cpu: CPUCounters?,
+        energySource: HostEnergySource = .hardware, energyCounterID: String? = nil)
+    {
+        self.gpuPercent = gpuPercent
+        self.vramUsedMiB = vramUsedMiB
+        self.vramTotalMiB = vramTotalMiB
+        self.energyMilliJoules = energyMilliJoules
+        self.uptime = uptime
+        self.watts = watts
+        self.ramUsedMiB = ramUsedMiB
+        self.ramTotalMiB = ramTotalMiB
+        self.cpu = cpu
+        self.energySource = energySource
+        self.energyCounterID = energyCounterID
+    }
 }
 
 public struct CPUCounters: Sendable {
@@ -111,12 +137,15 @@ public enum UsageError: LocalizedError, Sendable {
     case message(String)
     case http(Int)
     case oversized
+    /// HTTP 429; `until` comes from `Retry-After` when the server sends one.
+    case rateLimited(until: Date?)
 
     public var errorDescription: String? {
         switch self {
         case let .message(text): text
         case let .http(status): "Request failed (HTTP \(status))."
         case .oversized: "Response exceeded the size limit."
+        case .rateLimited: "Rate limited; retrying later."
         }
     }
 }
@@ -161,6 +190,44 @@ public enum UsageParser {
         let count = self.number(credits?["available_count"])
         let available = count.flatMap { $0 <= 1_000_000 && $0.rounded(.down) == $0 ? Int($0) : nil }
         return CodexSnapshot(windows: windows, plan: root["plan_type"] as? String, availableResets: available)
+    }
+
+    /// Anthropic's OAuth usage contract, as read by CodexBar's ClaudeOAuthUsageFetcher. `utilization` is a
+    /// percentage. A window without a reset has not started, so it has no allowance to show yet.
+    public static func claude(_ data: Data) throws -> [QuotaWindow] {
+        let root = try self.object(data)
+        guard root.keys.contains("five_hour") || root.keys.contains("seven_day") else {
+            throw UsageError.message("No subscription quota windows returned.")
+        }
+        return ClaudeWindow.allCases.compactMap { kind in
+            guard let value = root[kind.rawValue] as? [String: Any],
+                  let used = self.number(value["utilization"]),
+                  let reset = (value["resets_at"] as? String).flatMap(self.isoDate)
+            else { return nil }
+            return kind.window(usedPercent: used, resetsAt: reset)
+        }
+    }
+
+    /// The two Claude subscription windows Usage Bar shows, keyed as Anthropic names them.
+    public enum ClaudeWindow: String, CaseIterable, Sendable {
+        case fiveHour = "five_hour"
+        case sevenDay = "seven_day"
+
+        var period: TimeInterval {
+            self == .fiveHour ? 18000 : 604_800
+        }
+
+        func window(usedPercent: Double, resetsAt: Date) -> QuotaWindow {
+            QuotaWindow(
+                id: "Claude-\(self.rawValue)", label: self == .fiveHour ? "5-hour session" : "Weekly",
+                periodSeconds: self.period, lane: nil, usedPercent: usedPercent, resetsAt: resetsAt)
+        }
+    }
+
+    private static func isoDate(_ text: String) -> Date? {
+        // Microsecond fractions are not accepted by ISO8601DateFormatter; seconds precision suffices.
+        let trimmed = text.replacingOccurrences(of: #"\.\d+"#, with: "", options: .regularExpression)
+        return ISO8601DateFormatter().date(from: trimmed)
     }
 
     private static func windows(_ raw: Any?, prefix: String) -> [QuotaWindow] {
@@ -264,25 +331,36 @@ public enum UsageParser {
         let lines = text.split(separator: "\n").map(String.init)
         let gpu = lines.first(where: { $0.hasPrefix("GPU ") })?.dropFirst(4)
             .split(separator: ",").map { Double($0.trimmingCharacters(in: .whitespaces)) } ?? []
-        let energy = lines.first(where: { $0.hasPrefix("ENERGY ") })?
+        let hardwareEnergy = lines.first(where: { $0.hasPrefix("ENERGY ") })?
             .split(whereSeparator: \.isWhitespace).dropFirst().compactMap { Double($0) } ?? []
+        let estimateEnergy = lines.first(where: { $0.hasPrefix("ENERGY_ESTIMATE ") })?
+            .split(whereSeparator: \.isWhitespace).dropFirst().compactMap { Double($0) } ?? []
+        // Prefer the driver's lifetime counter when both protocols are present.
+        let energy = hardwareEnergy.count == 2 ? hardwareEnergy : estimateEnergy
+        let energySource: HostEnergySource =
+            hardwareEnergy.count == 2 ? .hardware : (estimateEnergy.count == 2 ? .estimate : .hardware)
+        let identityParts = lines.first(where: { $0.hasPrefix("ENERGY_ID ") })?
+            .split(whereSeparator: \.isWhitespace) ?? []
+        let energyCounterID = identityParts.count == 2 && identityParts[1].count <= 160
+            ? String(identityParts[1]) : nil
         let memory = lines.first(where: { $0.hasPrefix("Mem:") })?
             .split(whereSeparator: \.isWhitespace).dropFirst().compactMap { Double($0) } ?? []
         let cpuValues = lines.first(where: { $0.hasPrefix("cpu ") })?
             .split(whereSeparator: \.isWhitespace).dropFirst().prefix(8).compactMap { Double($0) } ?? []
         let cpu = cpuValues.count >= 5
             ? CPUCounters(total: cpuValues.reduce(0, +), idle: cpuValues[3] + cpuValues[4]) : nil
-        guard gpu.count >= 4 || memory.count >= 2 || cpu != nil else {
+        guard gpu.contains(where: { $0 != nil }) || memory.count >= 2 || cpu != nil else {
             throw UsageError.message("Host utilization unavailable.")
         }
         return HostSnapshot(
-            gpuPercent: gpu.count >= 4 ? gpu[0] : nil,
-            vramUsedMiB: gpu.count >= 4 ? gpu[1] : nil,
-            vramTotalMiB: gpu.count >= 4 ? gpu[2] : nil,
+            gpuPercent: gpu.indices.contains(0) ? gpu[0] : nil,
+            vramUsedMiB: gpu.indices.contains(1) ? gpu[1] : nil,
+            vramTotalMiB: gpu.indices.contains(2) ? gpu[2] : nil,
             energyMilliJoules: energy.count == 2 ? energy[0] : nil,
             uptime: energy.count == 2 ? energy[1] : nil,
-            watts: gpu.count >= 4 ? gpu[3] : nil,
+            watts: gpu.indices.contains(3) ? gpu[3] : nil,
             ramUsedMiB: memory.count >= 2 ? memory[1] : nil,
-            ramTotalMiB: memory.count >= 2 ? memory[0] : nil, cpu: cpu)
+            ramTotalMiB: memory.count >= 2 ? memory[0] : nil, cpu: cpu,
+            energySource: energySource, energyCounterID: energyCounterID)
     }
 }

@@ -6,6 +6,11 @@ struct CodexCostScanner {
     private let plain = ISO8601DateFormatter()
     private static let markers = ["\"token_count\"", "\"turn_context\"", "\"session_meta\""].map { Data($0.utf8) }
 
+    /// OMP revision 2 retains Anthropic subscription usage; earlier OMP scans discarded it.
+    static func version(for provider: String) -> Int {
+        provider == "omp" ? 2 : 1
+    }
+
     init() {
         self.fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
     }
@@ -20,8 +25,10 @@ struct CodexCostScanner {
             defer { try? handle.close() }
             var result = CodexHistoryFile(
                 size: size, mtimeMs: mtimeMs, provider: provider, records: [], tail: [],
-                offset: 0, guardLength: 0, guardHash: 0, state: CodexHistoryState())
+                offset: 0, guardLength: 0, guardHash: 0, state: CodexHistoryState(),
+                scanVersion: Self.version(for: provider))
             if let previous, previous.provider == provider, previous.state != nil,
+               previous.scanVersion == Self.version(for: provider),
                size > previous.size || previous.pendingScan, size >= previous.offset,
                previous.offset > 0, previous.guardLength > 0,
                try self.guardMatches(handle, previous)
@@ -190,7 +197,13 @@ struct CodexCostScanner {
               let message = object["message"] as? [String: Any],
               message["role"] as? String == "assistant" else { return nil }
         guard let provider = message["provider"] as? String else { incomplete = true; return nil }
-        guard provider == "openai-codex" || provider == "openai" else { return nil }
+        let vendor: APICostVendor
+        switch provider {
+        case "openai-codex", "openai": vendor = .openAI
+        // Only direct Anthropic sign-ins; Claude through OpenRouter or Antigravity bills elsewhere.
+        case "anthropic": vendor = .anthropic
+        default: return nil
+        }
         guard let usage = message["usage"] as? [String: Any],
               let input = Self.number(usage["input"]),
               let output = Self.number(usage["output"]),
@@ -198,6 +211,8 @@ struct CodexCostScanner {
               let written = Self.number(usage["cacheWrite"] ?? 0),
               let model = message["model"] as? String, !model.isEmpty
         else { incomplete = true; return nil }
+        let ttl = usage["cttl"] as? [String: Any]
+        guard let long = Self.number(ttl?["ephemeral1h"] ?? 0) else { incomplete = true; return nil }
         let timestamp = Self.number(message["timestamp"])
             ?? self.date(message["timestamp"]).map { $0.timeIntervalSince1970 * 1000 }
             ?? self.date(object["timestamp"]).map { $0.timeIntervalSince1970 * 1000 }
@@ -227,8 +242,10 @@ struct CodexCostScanner {
         }
         return CodexHistoryEvent(
             timestampMs: milliseconds, model: model, sessionID: state.sessionId,
-            tokens: APICostTokens(input: inclusive, cachedInput: cached, cacheWrite: written, output: output),
-            reasoning: 0, dedupeKey: identity, reportedCost: nil)
+            tokens: APICostTokens(
+                input: inclusive, cachedInput: cached, cacheWrite: written, cacheWriteLong: min(long, written),
+                output: output),
+            reasoning: 0, dedupeKey: identity, reportedCost: nil, vendor: vendor)
     }
 
     private static func number(_ value: Any?) -> Double? {

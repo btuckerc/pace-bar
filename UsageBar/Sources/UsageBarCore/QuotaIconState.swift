@@ -5,7 +5,7 @@ import Foundation
 /// A slot is tied to an account label, so removing or adding another account does not make
 /// existing bars move around. `nil` means that the account's reading is unavailable.
 public struct QuotaIconState: Equatable, Sendable {
-    public static let labels = ["primary", "secondary", "last", "btc"]
+    public static let labels = CodexAccount.labels
 
     public let levels: [Int?]
 

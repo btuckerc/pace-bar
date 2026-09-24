@@ -34,6 +34,9 @@ public actor Services {
         guard let response = response as? HTTPURLResponse else {
             throw UsageError.message("Invalid HTTP response.")
         }
+        if response.statusCode == 429 {
+            throw UsageError.rateLimited(until: Self.retryAfter(response.value(forHTTPHeaderField: "Retry-After")))
+        }
         guard response.statusCode == 200 else { throw UsageError.http(response.statusCode) }
         guard response.expectedContentLength <= limit else { throw UsageError.oversized }
         var data = Data()
@@ -42,6 +45,19 @@ public actor Services {
             data.append(byte)
         }
         return data
+    }
+
+    /// `Retry-After` is either delay seconds or an HTTP date.
+    static func retryAfter(_ value: String?, now: Date = Date()) -> Date? {
+        guard let value = value?.trimmingCharacters(in: .whitespaces), !value.isEmpty else { return nil }
+        if let seconds = TimeInterval(value), seconds.isFinite, seconds >= 0 {
+            return now.addingTimeInterval(min(seconds, 86400))
+        }
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(identifier: "GMT")
+        formatter.dateFormat = "EEE, dd MMM yyyy HH:mm:ss zzz"
+        return formatter.date(from: value).map { min($0, now.addingTimeInterval(86400)) }
     }
 
     public func codex(_ configuration: Configuration) async throws -> CodexSnapshot {
@@ -63,6 +79,24 @@ public actor Services {
             return try UsageParser.codex(data)
         } catch UsageError.http(401) {
             throw UsageError.message("Codex login expired. Sign in through Codex, then refresh.")
+        }
+    }
+
+    public func claude(account: ClaudeAccount, now: Date = Date()) async throws -> [QuotaWindow] {
+        guard !account.token.isEmpty
+        else { throw UsageError.message("Claude sign-in unreadable. Sign in to Claude in OMP.") }
+        let expired = UsageError.message("Claude login expired. Use Claude in OMP to renew it, then refresh.")
+        if let expires = account.expires, expires <= now { throw expired }
+        let headers = [
+            "Authorization": "Bearer \(account.token)",
+            "Accept": "application/json",
+            "anthropic-beta": "oauth-2025-04-20",
+        ]
+        do {
+            let data = try await self.get(URL(string: "https://api.anthropic.com/api/oauth/usage")!, headers: headers)
+            return try UsageParser.claude(data)
+        } catch UsageError.http(401) {
+            throw expired
         }
     }
 
@@ -132,9 +166,23 @@ enum HostProcess {
                 h = ctypes.c_void_p()
                 v = ctypes.c_ulonglong()
                 if n.nvmlDeviceGetHandleByIndex_v2(0, ctypes.byref(h)) == 0:
-                    if n.nvmlDeviceGetTotalEnergyConsumption(h, ctypes.byref(v)) == 0:
+                    if n.nvmlDeviceGetTotalEnergyConsumption(h, ctypes.byref(v)) == 0 and v.value != 0xffffffffffffffff:
+                        try:
+                            boot = open("/proc/sys/kernel/random/boot_id").read().strip()
+                        except OSError:
+                            boot = ""
+                        device_uuid = ""
+                        ident = ctypes.create_string_buffer(96)
+                        try:
+                            if n.nvmlDeviceGetUUID(h, ident, ctypes.c_uint(len(ident))) == 0:
+                                device_uuid = ident.value.decode("ascii", "ignore").strip()
+                        except AttributeError:
+                            pass
                         with open("/proc/uptime") as f:
                             print("ENERGY", v.value, f.read().split()[0])
+                        identity = "-".join(x for x in (boot, device_uuid) if x and not any(c.isspace() for c in x))
+                        if identity:
+                            print("ENERGY_ID", identity)
                 n.nvmlShutdown()
         except (OSError, AttributeError):
             pass

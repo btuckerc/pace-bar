@@ -6,8 +6,10 @@ import UsageBarCore
 final class UsageStore {
     var configuration = Configuration()
     var codex: [CodexReading] = []
+    var claude: [ClaudeReading] = []
     var router: OpenRouterSnapshot?
     var codexCost: APICostEstimate?
+    var claudeCost: APICostEstimate?
     var nous: NousSnapshot?
     var nousLifetime: NousLifetimeTotals?
     var host: HostSnapshot?
@@ -24,6 +26,7 @@ final class UsageStore {
     @ObservationIgnored private let services = Services()
     @ObservationIgnored private let quotaHistory = QuotaHistoryStore()
     @ObservationIgnored private let nousHistory = NousHistoryStore()
+    @ObservationIgnored private let claudeUsage = ClaudeUsageTracker()
     @ObservationIgnored private let costHistory = CodexCostHistory()
     @ObservationIgnored private let costPricing = APICostPricing()
     @ObservationIgnored private var timer: Timer?
@@ -96,7 +99,8 @@ final class UsageStore {
         let cloudInterval: TimeInterval = self.constrained ? 900 : 300
         let nousInterval: TimeInterval = self.constrained ? 300 : 60
         self.schedule("Codex", interval: cloudInterval, force: force)
-        self.schedule("Codex cost", interval: self.constrained ? 300 : 60, force: force)
+        self.schedule("Claude", interval: cloudInterval, force: force)
+        self.schedule("API cost", interval: self.constrained ? 300 : 60, force: force)
         self.schedule("OpenRouter", interval: cloudInterval, force: force)
         self.schedule("Nous", interval: nousInterval, force: force)
         if self.configuration.hostUtilization {
@@ -155,14 +159,29 @@ final class UsageStore {
                     self.quotaForecast = forecast
                     self.errors["History"] = saved ? nil : "Quota history could not be saved; estimates may restart after quitting."
                     self.codex = readings
-                case "Codex cost":
+                case "Claude":
+                    let accounts = try ClaudeAccount.discover()
+                    if self.claude.isEmpty {
+                        // Show the last known quota at once; a request may be skipped or rate limited.
+                        self.claude = await self.claudeUsage.cached(accounts)
+                    }
+                    let services = self.services
+                    let readings = await self.claudeUsage.refresh(accounts) { try await services.claude(account: $0) }
+                    guard generation == self.generation, !Task.isCancelled else { return }
+                    self.claude = readings
+                case "API cost":
                     let now = Date()
                     let history = await self.costHistory.records(authFile: config.codexAuthFile, now: now)
                     guard generation == self.generation, !Task.isCancelled else { return }
-                    let estimate = await self.costPricing.estimate(
-                        records: history.records, incomplete: history.incomplete, now: now)
+                    let codex = await self.costPricing.estimate(
+                        records: history.records.filter { $0.vendor == .openAI },
+                        incomplete: history.incomplete, now: now)
+                    let claude = await self.costPricing.estimate(
+                        records: history.records.filter { $0.vendor == .anthropic },
+                        incomplete: history.incomplete, now: now)
                     guard generation == self.generation, !Task.isCancelled else { return }
-                    self.codexCost = estimate
+                    self.codexCost = codex
+                    self.claudeCost = claude
                 case "OpenRouter":
                     let value = try await self.services.openRouter(config)
                     guard generation == self.generation else { return }
@@ -181,10 +200,17 @@ final class UsageStore {
                     self.errors["Nous history"] = saved ? nil : "Could not save Nous history; totals may be lost after quitting."
                     self.nous = value
                 default:
+                    let (storedEnergy, stored) = await self.nousHistory.energySnapshot(origin: config.nousURL)
+                    guard generation == self.generation, !Task.isCancelled else { return }
+                    self.gpuEnergy = storedEnergy
+                    self.errors["Host history"] = stored ? nil : "GPU energy history could not be loaded."
                     let value = try await self.services.host(config)
-                    guard generation == self.generation else { return }
+                    guard generation == self.generation, !Task.isCancelled else { return }
                     self.cpuPercent = value.cpu?.usage(since: self.host?.cpu)
-                    self.gpuEnergy.record(millijoules: value.energyMilliJoules, uptime: value.uptime)
+                    let (energy, saved) = await self.nousHistory.recordEnergy(value, origin: config.nousURL)
+                    guard generation == self.generation, !Task.isCancelled else { return }
+                    self.gpuEnergy = energy
+                    self.errors["Host history"] = saved ? nil : "Could not save GPU energy history; prior totals retained."
                     self.host = value
                 }
                 self.updated[provider] = Date()
@@ -209,7 +235,9 @@ final class UsageStore {
         self.configuration = config
         self.settingsError = nil
         self.codex = []
+        self.claude = []
         self.codexCost = nil
+        self.claudeCost = nil
         self.router = nil
         self.nous = nil
         self.nousLifetime = nil

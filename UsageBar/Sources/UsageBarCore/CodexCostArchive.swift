@@ -8,6 +8,7 @@ struct CodexHistoryEvent: Sendable {
     var reasoning: Double
     var dedupeKey: String?
     var reportedCost: Double?
+    var vendor: APICostVendor = .openAI
 }
 
 struct CodexHistoryState: Codable, Sendable {
@@ -31,10 +32,13 @@ struct CodexHistoryFile: Sendable {
     var state: CodexHistoryState?
     var incomplete = false
     var pendingScan = false
+    /// Reducer revision that produced `records`; an older revision is rescanned from the start.
+    var scanVersion = 1
 }
 
 /// T3 v3's compact interned representation, with optional Usage Bar provenance/checkpoint fields.
 /// Keeping records unfiltered is intentional: importing a 30-day display must not destroy older history.
+/// Usage Bar appends two optional row columns after T3's ten: one-hour cache writes and the API vendor.
 struct CodexHistoryArchive: Sendable {
     var files: [String: CodexHistoryFile] = [:]
     var importedT3 = false
@@ -80,7 +84,8 @@ struct CodexHistoryArchive: Sendable {
                 tail: tailRows.map { try Self.event($0, models: models, sessions: sessions) },
                 offset: offset, guardLength: length, guardHash: UInt32(hash), state: state,
                 incomplete: entry["usageBarIncomplete"] as? Bool ?? false,
-                pendingScan: entry["usageBarPendingScan"] as? Bool ?? false)
+                pendingScan: entry["usageBarPendingScan"] as? Bool ?? false,
+                scanVersion: Self.integer(entry["usageBarScanVersion"]) ?? 1)
         }
         return archive
     }
@@ -93,6 +98,9 @@ struct CodexHistoryArchive: Sendable {
               (uncached + cached + written).isFinite,
               row[8] is NSNull || row[8] is String,
               row[9] is NSNull || number(row[9]) != nil else { throw self.invalid }
+        let long = row.count > 10 ? Self.number(row[10]) : 0
+        let vendor = row.count > 11 ? (row[11] as? String).flatMap(APICostVendor.init(rawValue:)) : .openAI
+        guard let long, long <= written, let vendor else { throw self.invalid }
         let sessionIndex = Self.integer(row[2])
         let session = sessionIndex.flatMap { sessions.indices.contains($0) ? sessions[$0] : nil } ?? ""
         return CodexHistoryEvent(
@@ -101,8 +109,9 @@ struct CodexHistoryArchive: Sendable {
                 input: uncached + cached + written,
                 cachedInput: cached,
                 cacheWrite: written,
+                cacheWriteLong: long,
                 output: output),
-            reasoning: reasoning, dedupeKey: row[8] as? String, reportedCost: Self.number(row[9]))
+            reasoning: reasoning, dedupeKey: row[8] as? String, reportedCost: Self.number(row[9]), vendor: vendor)
     }
 
     func write(to url: URL) throws {
@@ -128,7 +137,7 @@ struct CodexHistoryArchive: Sendable {
                     max(0, tokens.input - tokens.cachedInput - tokens.cacheWrite), tokens.cachedInput,
                     tokens.cacheWrite,
                     tokens.output, event.reasoning, event.dedupeKey as Any? ?? NSNull(),
-                    event.reportedCost as Any? ?? NSNull(),
+                    event.reportedCost as Any? ?? NSNull(), tokens.cacheWriteLong, event.vendor.rawValue,
                 ]
             }
         }
@@ -141,6 +150,7 @@ struct CodexHistoryArchive: Sendable {
                 "t": rows(entry.tail),
                 "o": entry.offset, "gl": entry.guardLength, "gh": entry.guardHash, "cs": state,
                 "usageBarIncomplete": entry.incomplete, "usageBarPendingScan": entry.pendingScan,
+                "usageBarScanVersion": entry.scanVersion,
             ] as [String: Any]
         }
         var root: [String: Any] = [

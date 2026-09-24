@@ -10,6 +10,8 @@ NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=read-only
 PrivateTmp=true
+StateDirectory=usage-bar
+ReadWritePaths=%S/usage-bar
 RestrictAddressFamilies=AF_INET AF_UNIX
 UMask=0077
 

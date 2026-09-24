@@ -37,6 +37,32 @@ public actor NousHistoryStore {
         return (self.totals(for: Self.originKey(origin)), true)
     }
 
+    public func energySnapshot(origin: String) -> (GPUEnergy, Bool) {
+        self.loadIfNeeded()
+        guard self.available else { return (GPUEnergy(), false) }
+        return (self.history.hosts[Self.originKey(origin)]?.energy ?? GPUEnergy(), true)
+    }
+
+    public func recordEnergy(_ snapshot: HostSnapshot, origin: String) -> (GPUEnergy, Bool) {
+        self.loadIfNeeded()
+        guard self.available else { return (GPUEnergy(), false) }
+        let hostKey = Self.originKey(origin)
+        var next = self.history
+        var host = next.hosts[hostKey] ?? HostHistory()
+        let prior = host.energy ?? GPUEnergy()
+        var energy = prior
+        energy.record(snapshot)
+        guard energy.isValid else { return (prior, false) }
+        host.energy = energy
+        if next.hosts[hostKey] == nil {
+            guard next.hosts.count < Self.maxHosts else { return (prior, false) }
+        }
+        next.hosts[hostKey] = host
+        guard next == self.history || self.save(next) else { return (prior, false) }
+        self.history = next
+        return (energy, true)
+    }
+
     public func record(_ snapshot: NousSnapshot, origin: String) -> (NousLifetimeTotals, Bool) {
         self.loadIfNeeded()
         guard self.available else { return (NousLifetimeTotals(), false) }
@@ -226,6 +252,7 @@ private struct ModelHistory: Codable, Equatable {
 
 private struct HostHistory: Codable, Equatable {
     var models: [String: ModelHistory] = [:]
+    var energy: GPUEnergy?
 }
 
 private struct History: Codable, Equatable {
@@ -234,7 +261,10 @@ private struct History: Codable, Equatable {
 
     var isWithinBounds: Bool {
         self.hosts.count <= NousHistoryStore.maxHosts && self.hosts.values
-            .allSatisfy { $0.models.count <= NousHistoryStore.maxModelsPerHost }
+            .allSatisfy {
+                $0.models.count <= NousHistoryStore.maxModelsPerHost
+                    && ($0.energy?.isValid ?? true)
+            }
             && self.modelCount <= NousHistoryStore.maxModels
             && self.hosts.values.reduce(0) { $0 + $1.models.count } == self.modelCount
     }

@@ -16,7 +16,7 @@ private let backfillWindow = QuotaWindow(
 private func backfillReadings(plan: String = "pro") -> [CodexReading] {
     [CodexReading(
         id: "a",
-        label: "primary",
+        label: "Codex 1",
         snapshot: CodexSnapshot(windows: [backfillWindow], plan: plan),
         updated: backfillNow,
         error: nil)]

@@ -46,182 +46,141 @@ struct Dashboard: View {
 
     private var codexSection: some View {
         let now = Date()
-        let runway = self.store.quotaForecast.runway(
-            self.store.codex,
-            now: now,
-            freshness: self.store.constrained ? 1800 : 600)
+        let freshness: TimeInterval = self.store.constrained ? 1800 : 600
+        let pool = self.store.quotaForecast.pool(self.store.codex, now: now, freshness: freshness)
         let resets = self.store.errors["Codex"] == nil ? CodexResetInventory.total(
-            self.store.codex, now: now, freshness: self.store.constrained ? 1800 : 600) : nil
+            self.store.codex, now: now, freshness: freshness) : nil
         return VStack(alignment: .leading, spacing: 12) {
             self.heading(
-                "Codex",
+                "Frontier",
                 provider: "Codex",
                 detail: resets.map { "\($0) \($0 == 1 ? "reset" : "resets")" } ?? "— resets")
-                .help(
-                    "Available banked resets across all accounts. Does not count scheduled quota renewals. Unknown or stale counts show —.")
-            ForEach(self.store.codex) { account in
-                let stale = self.store.errors["Codex"] != nil || account.error != nil || account.updated.map {
-                    Date().timeIntervalSince($0) > (self.store.constrained ? 1800 : 600)
-                } ?? false
-                HStack(alignment: .top, spacing: 12) {
-                    HStack(spacing: 4) {
-                        Text(account.label).font(.system(size: 11, weight: .medium))
-                        if stale {
-                            Image(systemName: "exclamationmark.circle.fill").foregroundStyle(.orange)
-                                .font(.system(size: 9)).help(account.error ?? "Last reading is stale")
-                        }
+                .help("Banked resets ready to redeem across Codex accounts")
+            HStack(alignment: .top, spacing: 0) {
+                ForEach(self.store.codex) { account in
+                    let stale = self.store.errors["Codex"] != nil || account.error != nil || account.updated.map {
+                        now.timeIntervalSince($0) > freshness
+                    } ?? false
+                    let reason = stale ? account.error ?? self.store.errors["Codex"] ?? "Reading is out of date" : nil
+                    let unused = pool.expiring[account.id].flatMap {
+                        $0 >= 0.5 ? "≈ \(Int($0.rounded()))% will reset unused" : nil
                     }
-                    .frame(width: 70, alignment: .leading)
-                    .help(self.accountHelp(account))
-                    if let snapshot = account.snapshot {
-                        VStack(spacing: 10) {
-                            ForEach(snapshot.windows) { window in
-                                let estimate = self.exhaustion(
-                                    account: account,
-                                    window: window,
-                                    stale: stale,
-                                    runway: runway,
-                                    now: now)
-                                VStack(spacing: 5) {
-                                    HStack(spacing: 4) {
-                                        Text(estimate.title).lineLimit(1)
-                                            .foregroundStyle(.secondary)
-                                        Spacer(minLength: 0)
-                                        Text("\(window.remainingPercent, specifier: "%.0f")%").fixedSize()
-                                        Text(self.reset(window.resetsAt)).foregroundStyle(.secondary).fixedSize()
-                                    }
-                                    .font(.system(size: 11)).monospacedDigit()
-                                    self.rail(window.remainingPercent, stale: stale)
-                                }
-                                .help(
-                                    "\(window.label): \(window.remainingPercent.formatted())% remaining. "
-                                        + "Resets \(window.resetsAt.formatted()).\n" + estimate.detail)
-                                .accessibilityElement(children: .combine)
-                            }
-                        }
-                        .opacity(stale ? 0.55 : 1)
-                    } else {
-                        Text("—").foregroundStyle(.secondary)
-                        Spacer()
+                    AccountRing(
+                        label: account.label,
+                        outer: account.snapshot?.windows.filter { $0.lane == nil }
+                            .min { $0.remainingPercent < $1.remainingPercent },
+                        tint: Palette.codex,
+                        staleReason: reason,
+                        help: self.ringHelp(
+                            title: [account.label, account.snapshot?.plan?.capitalized].compactMap(\.self)
+                                .joined(separator: " · "),
+                            windows: account.snapshot?.windows ?? [], notes: [unused, reason],
+                            updated: account.updated, stale: stale))
+                }
+                if self.store.codex.isEmpty {
+                    AccountRing(
+                        label: "Codex", outer: nil, tint: Palette.codex, staleReason: self.store.errors["Codex"],
+                        help: self.store.errors["Codex"] ?? "Waiting for a reading")
+                }
+                if !self.store.claude.isEmpty || self.store.errors["Claude"] != nil {
+                    Divider().frame(height: 70)
+                }
+                ForEach(self.store.claude) { account in
+                    // Anthropic rate-limits its usage endpoint, so readings are paced; up to an hour old is normal.
+                    let old = account.updated.flatMap {
+                        now
+                            .timeIntervalSince($0) > 3600 ?
+                            "Last read \($0.formatted(.relative(presentation: .named)))" : nil
                     }
+                    let reason = account.error ?? self.store.errors["Claude"] ?? old
+                    AccountRing(
+                        label: account.label,
+                        outer: account.windows?.first { $0.periodSeconds == 604_800 },
+                        inner: account.windows?.first { $0.periodSeconds == 18000 },
+                        tint: Palette.claude, innerTint: Palette.claudeSoft,
+                        staleReason: reason,
+                        help: self.ringHelp(
+                            title: account.label, windows: account.windows ?? [],
+                            notes: [
+                                account.windows?.isEmpty == true ? "No active window" : nil,
+                                account.error ?? self.store.errors["Claude"],
+                            ],
+                            updated: account.updated, stale: true))
+                }
+                if self.store.claude.isEmpty, let error = self.store.errors["Claude"] {
+                    AccountRing(label: "Claude 1", outer: nil, tint: Palette.claude, staleReason: error, help: error)
                 }
             }
+            if !self.store.codex.isEmpty { self.poolSummary(pool) }
 
-            if self.store.codex.isEmpty { Text("—").foregroundStyle(.secondary) }
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 12) {
-                    PrivateCostMetric(
-                        title: "API equivalent · 7d",
-                        amount: self.store.codexCost?.weekUSD,
-                        explanation: self.codexCostHelp)
-                    PrivateCostMetric(
-                        title: "API equivalent · 30d",
-                        amount: self.store.codexCost?.usd,
-                        explanation: self.codexCostHelp)
-                }
-                Text("* Not billed spend")
-                    .font(.system(size: 10)).foregroundStyle(.secondary)
-                    .help(self.codexCostHelp)
-            }
+            APICostSummary(codex: self.store.codexCost, claude: self.store.claudeCost)
         }
     }
 
-    private var codexCostHelp: String {
-        var text = "Estimated API price of locally recorded OpenAI/Codex usage from Codex, OMP, and Pi. "
-            + "The 7-day and 30-day windows include today and the preceding 6 or 29 calendar days in this Mac's time zone. "
-            + "Usage Bar reads usage and calculates costs independently; T3 does not need to be running. "
-            + "Across local sessions, not per subscription account. Other machines and non-OpenAI providers are excluded. "
-            + "Not your bill, subscription fee, savings, or a forecast. "
-            + "Input and cache are priced separately; reasoning is already in output. Base rates are not an invoice. "
-            + "Local usage refreshes every minute, or every five minutes when power or thermal limits apply."
-        if let updated = self.store.updated["Codex cost"] {
-            text += " Usage checked \(updated.formatted(date: .omitted, time: .standard))."
-        }
-        if let cost = self.store.codexCost {
-            if cost.unpricedRecords > 0 {
-                text += " \(cost.unpricedRecords) usage records have no known price and are excluded."
-            }
-            if cost
-                .incomplete { text += " History or pricing coverage is incomplete; this is only the known subtotal." }
-            if let date = cost.ratesUpdated {
-                text += " LiteLLM pricing catalog fetched \(date.formatted(date: .abbreviated, time: .omitted))."
-                if Date().timeIntervalSince(date) > 86400 { text += " Cached rates may be out of date." }
-            }
-            if cost.usd == nil { text += " No priceable local usage is available; — does not mean zero cost." }
-        }
-        return text
-    }
-
-    private func exhaustion(
-        account: CodexReading,
-        window: QuotaWindow,
-        stale: Bool,
-        runway: QuotaRunway,
-        now: Date) -> (title: String, detail: String)
-    {
-        if window.lane == nil {
-            return self.orderedEstimate(account: account, window: window, stale: stale, runway: runway, now: now)
-        }
-        let projection = self.store.quotaForecast.project(account: account.id, window: window, now: Date())
-        let value: String
-        let detail: String
-        if stale {
-            value = "—"
-            detail = "Fresh account data is needed for an estimate."
-        } else if window.resetsAt <= Date() {
-            value = "Resetting"
-            detail = "Awaiting the updated quota after its reset."
-        } else if window.remainingPercent == 0 {
-            value = "Capped"
-            detail = "This allowance is exhausted."
-        } else if let date = projection.exhaustion {
-            value = "≈ " + self.forecastDate(date)
-            detail = "Estimated exhaustion: \(date.formatted()). \(projection.method). Assumes this lane's pace continues."
-        } else if projection.method == "Learning history" {
-            value = "Learning"
-            detail = "Needs two completed days with observed consumption. Uses up to 30 days, excluding today and idle days."
+    private func poolSummary(_ pool: QuotaPool) -> some View {
+        let forecast: String = if let end = pool.exhaustsAt {
+            end.timeIntervalSinceNow < 60 ? "empty now" : "≈ lasts to \(self.forecastDate(end))"
+        } else if let through = pool.coveredThrough {
+            "covers past \(self.forecastDate(through))"
+        } else if pool.remainingPercent != nil {
+            "forecast learning"
         } else {
-            value = "To reset"
-            detail = "At the observed pace this allowance lasts until its reset. \(projection.method)."
+            "forecast unavailable"
         }
-        let prefix = window.lane.map { $0 == "gpt-reserve" ? "Reserve" : $0 }
-            ?? (window.periodSeconds == 604_800 ? nil : window.compactLabel)
-        return (
-            prefix.map { "\($0) · \(value)" } ?? value,
-            detail + (self.store.errors["History"].map { " \($0)" } ?? ""))
+        var help: [String] = if let daily = pool.dailyConsumption {
+            [
+                "Your pace: \(Int(daily.rounded())) points/day over \(pool.activeDays) active days.",
+                "Spends the soonest-resetting quota first, like OMP.",
+            ]
+        } else {
+            [pool.explanation]
+        }
+        help += self.store.codex.compactMap { account in
+            pool.expiring[account.id].flatMap {
+                $0 >= 0.5 ? "\(account.label): ≈ \(Int($0.rounded()))% resets unused" : nil
+            }
+        }
+        if let error = self.store.errors["History"] { help.append(error) }
+        return VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: 4) {
+                Text("Codex pool " + (pool.remainingPercent.map { "\(Int($0.rounded(.down)))%" } ?? "—"))
+                Text(forecast).foregroundStyle(.secondary)
+                Spacer()
+            }
+            if pool.expiringPercent >= 1 {
+                Text("≈ \(Int(pool.expiringPercent.rounded()))% of the pool resets unused at your pace")
+                    .foregroundStyle(.orange)
+            }
+        }
+        .font(.system(size: 11)).monospacedDigit()
+        .help(help.joined(separator: "\n"))
     }
 
-    private func orderedEstimate(
-        account: CodexReading,
-        window: QuotaWindow,
-        stale: Bool,
-        runway: QuotaRunway,
-        now: Date) -> (title: String, detail: String)
+    private func windowHelp(_ window: QuotaWindow) -> String {
+        let name: String = if let lane = window.lane {
+            lane == "gpt-reserve" ? "Reserve" : lane
+        } else {
+            switch window.periodSeconds {
+            case 18000: "5-hour"
+            case 604_800: "Weekly"
+            default: window.compactLabel
+            }
+        }
+        return "\(name) \(Int(window.remainingPercent.rounded(.down)))% left · resets \(self.forecastDate(window.resetsAt))"
+    }
+
+    /// Name, then each window, then only what needs attention.
+    private func ringHelp(
+        title: String,
+        windows: [QuotaWindow],
+        notes: [String?],
+        updated: Date?,
+        stale: Bool) -> String
     {
-        guard !stale else { return ("—", "Fresh account data is needed for the ordered runway.") }
-        guard let entry = runway.entries[account.id] else { return ("—", runway.explanation) }
-        var detail = runway.explanation + (self.store.errors["History"].map { " \($0)" } ?? "")
-        let refill = entry.refills > 0 ? "↻ " : ""
-        if entry.refills > 0 { detail += " This account refills before its projected depletion." }
-        if entry.interrupted { detail += " Its turn is interrupted by an earlier account's refill." }
-        if let start = entry.startsAt, let end = entry.exhaustsAt {
-            detail += " First use: \(start.formatted()). First depletion: \(end.formatted())."
-            let from = start.timeIntervalSince(now) < 1 ? "Now" : self.scheduleDay(start, now: now)
-            return (refill + "≈ \(from) → \(self.forecastDate(end))", detail)
-        }
-        if let through = entry.coveredThrough {
-            return (refill + "Through " + self.scheduleDay(through, now: now), detail)
-        }
-        if entry.startsAt != nil { return ("Later", detail) }
-        if window
-            .remainingPercent == 0 { return ("Capped", detail + " No use is scheduled before the forecast horizon.") }
-        return ("Later", detail + " Not needed before the forecast horizon.")
-    }
-
-    private func scheduleDay(_ date: Date, now: Date) -> String {
-        date.timeIntervalSince(now) >= 604_800
-            ? date.formatted(.dateTime.month(.abbreviated).day())
-            : date.formatted(.dateTime.weekday(.abbreviated))
+        let freshness = stale ? updated.map { "Updated \($0.formatted(.relative(presentation: .named)))" } : nil
+        return ([title] + windows.sorted { $0.periodSeconds < $1.periodSeconds }
+            .map(self.windowHelp) + notes + [freshness])
+            .compactMap(\.self).joined(separator: "\n")
     }
 
     private func forecastDate(_ date: Date) -> String {
@@ -235,90 +194,105 @@ struct Dashboard: View {
             self.heading("OpenRouter", provider: "OpenRouter", detail: nil)
             HStack(alignment: .top) {
                 self.metric("Balance", self.money(self.store.router?.balance))
-                    .help("Account-wide credit balance in USD")
+                    .help("OpenRouter credit left, account-wide")
                 PrivateCostMetric(
                     title: "Spent · lifetime",
                     amount: self.store.router?.totalSpent,
-                    explanation: "Actual account-wide OpenRouter credit usage in USD, not a 30-day estimate. "
-                        + "Excludes external BYOK bills.")
+                    explanation: "Actual OpenRouter credit spent, all time. Excludes BYOK provider bills.")
             }
             if let cap = self.store.router?.keyRemaining {
                 Text("Cap \(self.money(cap))").font(.caption2).foregroundStyle(.secondary)
-                    .help("Remaining spending allowance for this API key")
+                    .help("Spending left on this API key")
             }
         }
     }
 
     private var nousSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            self.heading("nous", provider: "Nous", detail: self.store.nous?.model == nil ? "Idle" : nil)
-            if let model = self.store.nous?.model {
-                Text(model).font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1).help(model)
-            }
-            HStack {
-                self.metric("Output", self.number(self.store.nousLifetime?.outputTokens))
-                self.metric("Input", self.number(self.store.nousLifetime?.promptTokens))
-                self.metric("Cache", self.number(self.store.nousLifetime?.cachedTokens))
-                self.metric("t/s", self.decimal(self.store.nous?.generationTPS))
-            }
-            .help(
-                "Persistent observed lifetime totals across models and app restarts. Input excludes cached tokens. "
-                    + "t/s is llama-server's generation-rate gauge, not time to first token.")
-            if let nous = self.store.nous, (nous.processing ?? 0) + (nous.queued ?? 0) > 0 {
-                Text("\(self.number(nous.processing)) active · \(self.number(nous.queued)) queued")
-                    .font(.caption2).foregroundStyle(.secondary)
+        let nous = self.store.nous
+        let host = self.store.host
+        let hostStale = self.store.errors["Host"] != nil
+        return VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 6) {
+                Text("nous").font(.system(size: 13, weight: .semibold))
+                self.status("Nous")
+                if let model = nous?.model {
+                    if self.store.errors["Nous"] == nil {
+                        Circle().fill(Palette.local).frame(width: 6, height: 6).help("Model loaded")
+                    }
+                    Text(model).font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1)
+                        .truncationMode(.middle).help(model)
+                }
+                Spacer()
+                if nous?.model == nil {
+                    Text("Idle").font(.system(size: 11)).foregroundStyle(.secondary)
+                } else {
+                    Text("\(self.decimal(nous?.generationTPS)) t/s" + self.queueSummary(nous))
+                        .font(.system(size: 11, weight: .medium)).monospacedDigit()
+                        .help("Generation speed reported by llama-server")
+                }
             }
             if self.store.configuration.hostUtilization {
-                HStack(spacing: 16) {
-                    self.hostMeter("GPU", value: self.store.host?.gpuPercent)
-                    self.hostMeter("CPU", value: self.store.cpuPercent)
+                HStack(alignment: .top, spacing: 0) {
+                    MeterRing(
+                        label: "GPU", value: host?.gpuPercent,
+                        detail: host?.watts.map { "\(Int($0.rounded())) W" } ?? "", stale: hostStale,
+                        help: host?.gpuPercent == nil ? "GPU reading unavailable"
+                            : "GPU busy \(self.percent(host?.gpuPercent))"
+                            + (host?.watts.map { " · drawing \(self.decimal($0)) W" } ?? ""))
+                    MeterRing(
+                        label: "CPU", value: self.store.cpuPercent, detail: "", stale: hostStale,
+                        help: self.store.cpuPercent == nil ? "CPU reading unavailable"
+                            : "CPU busy \(self.percent(self.store.cpuPercent)), averaged since the last sample")
+                    self.memoryRing("VRAM", used: host?.vramUsedMiB, total: host?.vramTotalMiB, stale: hostStale)
+                    self.memoryRing("RAM", used: host?.ramUsedMiB, total: host?.ramTotalMiB, stale: hostStale)
                 }
-                HStack(alignment: .top) {
-                    self.metric("GPU W", self.decimal(self.store.host?.watts)).help("Current GPU board power draw")
-                    self.metric("Avg W", self.decimal(self.store.gpuEnergy.averageWatts))
-                        .help(
-                            "Average GPU power between the latest valid hardware readings. Available after two polls.")
-                    self.metric("Wh", self.decimal(self.store.gpuEnergy.wattHours))
-                        .help("NVIDIA's cumulative GPU energy since the driver last reloaded. Survives app restarts.")
+            }
+            TokenBar(totals: self.store.nousLifetime)
+            if self.store.configuration.hostUtilization {
+                HStack(spacing: 4) {
+                    let estimated = self.store.gpuEnergy.isEstimated
+                    Group {
+                        Text("Energy").foregroundStyle(.secondary)
+                        Text("\(self.number(self.store.gpuEnergy.wattHours)) Wh" + (estimated ? " (est.)" : ""))
+                        if let average = self.store.gpuEnergy.averageWatts {
+                            Text("avg \(Int(average.rounded())) W").foregroundStyle(.secondary)
+                        }
+                    }
+                    .help("GPU energy recorded so far" + (estimated ? ", estimated from sampled power" : "")
+                        + ". Average is between the last two samples.")
+                    Spacer()
                     if let rate = self.store.configuration.electricityUSDPerKWh {
                         PrivateCostMetric(
-                            title: "GPU cost",
-                            amount: self.store.gpuEnergy.cost(rate: rate),
-                            explanation: "GPU energy since the driver last reloaded × $\(rate)/kWh. "
-                                + "Not API-equivalent cost. Excludes the rest of the host and PSU losses.")
+                            title: "GPU cost", amount: self.store.gpuEnergy.cost(rate: rate),
+                            explanation: "Recorded GPU energy × \(self.money(rate))/kWh", inline: true)
                     }
-                }
-                HStack {
-                    Text("VRAM \(self.memory(self.store.host?.vramUsedMiB, self.store.host?.vramTotalMiB))")
-                    Spacer()
-                    Text("RAM \(self.memory(self.store.host?.ramUsedMiB, self.store.host?.ramTotalMiB))")
                     self.status("Host")
                 }
-                .font(.system(size: 11)).foregroundStyle(.secondary).monospacedDigit()
+                .font(.system(size: 11)).monospacedDigit()
             }
         }
     }
 
-    private func hostMeter(_ label: String, value: Double?) -> some View {
-        VStack(spacing: 4) {
-            HStack {
-                Text(label).foregroundStyle(.secondary)
-                Spacer(minLength: 3)
-                Text(value.map { "\(self.number($0))%" } ?? "—")
-            }.font(.system(size: 11)).monospacedDigit()
-            self.rail(value ?? 0, stale: self.store.errors["Host"] != nil)
-        }
-        .help("\(label) utilization. CPU is averaged between host samples.")
+    private func queueSummary(_ nous: NousSnapshot?) -> String {
+        let active = nous?.processing ?? 0
+        let queued = nous?.queued ?? 0
+        guard active + queued > 0 else { return "" }
+        return " · \(self.number(active)) active" + (queued > 0 ? " · \(self.number(queued)) queued" : "")
     }
 
-    private func rail(_ value: Double, stale: Bool = false) -> some View {
-        GeometryReader { geometry in
-            ZStack(alignment: .leading) {
-                Capsule().fill(.primary.opacity(0.08))
-                Capsule().fill(stale ? Color.secondary : Color.accentColor)
-                    .frame(width: geometry.size.width * min(100, max(0, value)) / 100)
-            }
-        }.frame(height: 3)
+    private func memoryRing(_ label: String, used: Double?, total: Double?, stale: Bool) -> some View {
+        let value: Double? = if let used, let total, total > 0 {
+            min(100, used / total * 100)
+        } else {
+            nil
+        }
+        return MeterRing(
+            label: label, value: value, detail: used == nil ? "" : self.memory(used, total), tint: Palette.localSoft,
+            stale: stale, help: "\(label) \(self.memory(used, total)) in use")
+    }
+
+    private func percent(_ value: Double?) -> String {
+        value.map { "\(Int($0.rounded()))%" } ?? "—"
     }
 
     private func heading(_ title: String, provider: String, detail: String?) -> some View {
@@ -334,25 +308,17 @@ struct Dashboard: View {
     private func status(_ provider: String) -> some View {
         let error = self.store.errors[provider]
             ?? (provider == "Nous" ? self.store.errors["Nous history"] : nil)
+            ?? (provider == "Host" ? self.store.errors["Host history"] : nil)
             ?? (provider == "OpenRouter" ? self.store.router?.warning : nil)
         let date = self.store.updated[provider]
         let stale = date.map { Date().timeIntervalSince($0) > (self.store.constrained ? 1800 : 600) } ?? false
         if error != nil || stale {
             Image(systemName: "exclamationmark.circle.fill")
                 .font(.system(size: 9)).foregroundStyle(Color.orange)
-                .help(error ?? date.map { "Updated \($0.formatted())" } ?? "Waiting for reading")
+                .help(error ?? date
+                    .map { "Updated \($0.formatted(.relative(presentation: .named)))" } ?? "Waiting for a reading")
                 .accessibilityLabel(error ?? "\(provider) reading is stale")
         }
-    }
-
-    private func accountHelp(_ account: CodexReading) -> String {
-        [
-            account.label,
-            account.snapshot?.plan?.capitalized,
-            account.error,
-            account.updated.map { "Updated \($0.formatted())" },
-        ]
-            .compactMap(\.self).joined(separator: "\n")
     }
 
     private func metric(_ name: String, _ value: String) -> some View {
@@ -363,20 +329,15 @@ struct Dashboard: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private func reset(_ date: Date) -> String {
-        let seconds = max(0, date.timeIntervalSinceNow)
-        if seconds == 0 { return "due" }
-        if seconds >= 86400 { return "\(Int(ceil(seconds / 86400)))d" }
-        if seconds >= 3600 { return "\(Int(ceil(seconds / 3600)))h" }
-        return "\(Int(ceil(seconds / 60)))m"
-    }
-
     private func money(_ value: Double?) -> String {
         value.map { $0.formatted(.currency(code: "USD")) } ?? "—"
     }
 
-    private func number(_ value: Double?) -> String {
-        value.map { $0.formatted(.number.precision(.fractionLength(0))) } ?? "—"
+    private func number(_ value: Double?, compact: Bool = false) -> String {
+        value.map {
+            $0.formatted(.number.locale(compact ? Locale(identifier: "en_US") : .current)
+                .notation(compact ? .compactName : .automatic).precision(.fractionLength(0...(compact ? 1 : 0))))
+        } ?? "—"
     }
 
     private func decimal(_ value: Double?) -> String {
