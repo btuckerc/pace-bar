@@ -62,8 +62,8 @@ auth.json
 credentials.json
 secrets.json
 secrets/
-.config/usage-bar/
-.local/share/usage-bar/
+.config/pace-bar/
+.local/share/pace-bar/
 quota-history.json
 nous-history.json
 quota-backfill*.json
@@ -74,4 +74,4 @@ quota-backfill*.json
 *.db
 *.db-wal
 *.db-shm
-Usage Bar.app/
+Pace Bar.app/

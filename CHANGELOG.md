@@ -1,5 +1,11 @@
 # Changelog
 
+## Pace Bar 0.4.0
+
+- Rename Usage Bar to Pace Bar: app `Pace Bar.app`, bundle ID `com.btuckerc.PaceBar`, repository `btuckerc/pace-bar`, release tags `pace-bar-vX.Y.Z`.
+- On first launch, quit Usage Bar and copy its settings, history, and pricing cache to the `pace-bar` folders; the originals stay as a backup and an existing new folder is never overwritten.
+- Rename the optional host service to `pace-bar-metrics.service`, with state in `~/.local/state/pace-bar`.
+
 ## Usage Bar 0.3.1
 
 - Make five level bars the default menu-bar icon (Codex 1–4, then Claude 1 in its own slot); the four-arc Orbit remains selectable under Settings › Menu bar icon and switches without refreshing.
