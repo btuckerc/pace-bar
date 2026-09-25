@@ -1,14 +1,25 @@
 # Setup
 
-Open Pace Bar from Applications, click its menu bar icon, then the gear. Settings save to `~/.config/pace-bar/config.json`; this file contains paths and preferences, not credentials. Launch at login is optional. **Menu bar icon** switches between Bars (Codex 1–4 and Claude) and Orbit (the four Codex arcs of the app icon).
+Open Pace Bar from Applications, click its menu bar icon, then the gear. Settings has three panes in its toolbar: **Accounts**, **Hosts**, and **General**. They save to `~/.config/pace-bar/config.json`; this file contains paths and preferences, not credentials. Launch at login is optional. **Menu bar icon** (General) switches between Bars (one bar per tracked account, Codex then Claude) and Orbit (one ring per provider, split into an arc per account).
 
-## Codex
+## Accounts
 
-Sign in through Codex first. Pace Bar reads `~/.codex/auth.json` by default, plus existing auth files in `~/.codex-t3/*/` and `~/.codex-gui/*/`. You can change the primary auth-file path in Settings.
+The Accounts tab lists the Codex and Claude subscriptions Pace Bar tracks, in order. Each row shows the account's name and its email and plan as the provider reports it; hover for where the sign-in lives. The **⋯** menu renames, pauses or resumes tracking, and removes the account.
 
-Codex accounts appear as rings named **Codex 1, Codex 2, Codex 3, Codex 4**. These names come from the auth-home aliases (the configured home, then `second`, `last`, `btc`); repeated sign-ins to the same account appear only once. General account naming and reordering are not configurable yet.
+**Remove** only stops tracking in Pace Bar. The sign-in and its history stay where they are. Names are never recycled: after removing Codex 3 and Codex 4, Codex 1 and Codex 2 keep their names and the next account you add is Codex 5. Removed and paused accounts are left out of the Codex pool forecast.
 
-A Claude ring appears after you sign in to Claude in OMP (`/login` → Anthropic). Pace Bar reads that sign-in from `~/.omp/agent/agent.db` without changing it.
+### Add an account
+
+**Add Codex account…** or **Add Claude account…** opens one sheet:
+
+- **On this Mac** lists sign-ins Pace Bar found but does not track, including accounts you removed (shown with their previous name). **Add** tracks it; a removed account comes back with its old name and history. Pace Bar never adds anything on its own.
+- **Sign In with ChatGPT…** creates a private Codex folder for the new account (`~/.codex-pace-<id>`) and runs `codex login` there with file-based credential storage, so macOS Keychain is never used. Your browser opens; when you finish, the sheet shows the account's email and plan and **Add** tracks it. **Command** shows exactly what runs. Cancel stops the sign-in without adding anything. Signing in to an account Pace Bar already tracks updates that account instead of adding a duplicate.
+- **Choose auth.json…** tracks an `auth.json` another tool already maintains. Pace Bar reads it and never rewrites it.
+- **Sign In with Claude…** runs `omp login anthropic` with OMP (install [oh-my-pi](https://github.com/can1357/oh-my-pi) first). If OMP asks for a code, paste it into the sheet. Pace Bar then rereads OMP's sign-ins from `~/.omp/agent/agent.db` (read-only) and lists the new account with **Add**. Removing a Claude account never signs it out of OMP.
+
+Pace Bar needs the `codex` or `omp` command installed (it looks in `~/.local/share/mise/shims`, `~/.local/bin`, `/opt/homebrew/bin`, and `/usr/local/bin`) and says so if it is missing. For a Codex account whose folder Pace Bar created, **⋯ › Remove and Sign Out…** also signs that folder out; other Codex sign-ins are never touched.
+
+Existing Usage Bar setups carry over: the four Codex accounts and Claude 1 keep their names and history.
 
 Expired credentials must be renewed in the app that created them. Pace Bar never refreshes or rewrites them. Subscription quotas come from an undocumented service endpoint, so provider changes can affect availability.
 
@@ -16,13 +27,15 @@ Estimates need at least two completed active days of observed history. Existing 
 
 ## OpenRouter
 
-The default credential path is OpenCode's `~/.local/share/opencode/auth.json`. Alternatively, point Settings at a private file containing an `apiKey` field (or OpenCode's nested `openrouter` API entry). Keep that file outside this repository and readable only by your user.
+OpenRouter also lives on the Accounts tab. It uses one API key file, by default OpenCode's `~/.local/share/opencode/auth.json`; **Choose…** points it at another private file containing an `apiKey` field (or OpenCode's nested `openrouter` API entry). Keep that file outside this repository and readable only by your user.
 
 Balance and total spent come from the account credits endpoint. They cover OpenRouter credits, not bills from external BYOK providers.
 
 ## Local inference
 
-Set **Nous URL** to your llama-server origin, such as `http://inference-host:8080`. The section is currently named “nous,” after the original host; the address is configurable. Enable llama-server's metrics endpoint (`--metrics`). The app reads `/v1/models` and `/metrics`; it does not generate tokens or load models. Output, input, and cache totals are collected for observed model counters, scoped to the Nous URL, and retained across app restarts in `~/.local/share/pace-bar/nous-history.json`. Totals start with the currently available process counters, preserve known resets, and cannot recover prior ended-process usage, models loaded and unloaded between polls, or resets that were not observed.
+The **Hosts** pane lists your llama-server hosts; each gets its own popover section. **Add Host…** asks for a name and the server origin, such as `http://inference-host:8080`, then opens **Check Setup**. Existing Usage Bar setups start with one host named “nous.” Enable llama-server's metrics endpoint (`--metrics`). The app reads `/v1/models` and `/metrics`; it does not generate tokens or load models. Output, input, and cache totals are collected for observed model counters, scoped to each host's server origin, and retained across app restarts in `~/.local/share/pace-bar/nous-history.json`. Totals start with the currently available process counters, preserve known resets, and cannot recover prior ended-process usage, models loaded and unloaded between polls, or resets that were not observed.
+
+**Check Setup…** connects with your existing SSH alias (no passwords or host-key prompts), checks each requirement, and lists what passes. If the host API collector is missing or out of date, it shows the steps it would run, with the exact commands under **Commands**; nothing changes until you click **Run Setup**. It installs only Pace Bar's collector and its user service, verifies the result, and rolls back its own changes if a step fails. It never touches the inference server.
 
 For CPU, GPU, memory, and power readings, choose either:
 

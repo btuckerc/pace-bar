@@ -66,6 +66,32 @@ private func poolHistory(rate: Double) -> QuotaForecast {
     return forecast
 }
 
+@Test func `Removed enrollments contribute neither capacity nor historical rate and missing enabled accounts block the pool`() throws {
+    var config = Configuration()
+    var forecast = QuotaForecast()
+    for number in 1...4 {
+        try config.enroll(AccountCandidate(
+            provider: .codex, providerAccountID: "\(number)", label: "Codex \(number)",
+            source: .codexFiles(paths: ["/test/\(number)/auth.json"], managedHome: nil)))
+        for ago in [2, 1] {
+            poolActivity(&forecast, account: "\(number)", amount: Double(number * 10), ago: ago)
+        }
+    }
+    config.accounts[2].removed = true
+    config.accounts[3].removed = true
+    let active = config.activeAccounts(.codex)
+    let readings = active.map { poolAccount($0.readingID, remaining: $0.slot == 0 ? 50 : 100) }
+    let pool = forecast.pool(readings, now: poolNow, calendar: poolCalendar)
+    #expect(pool.remainingPercent == 75)
+    #expect(pool.dailyConsumption == 30)
+    #expect(active.map(\.label) == ["Codex 1", "Codex 2"])
+    var missing = readings
+    missing[1].error = "unavailable"
+    #expect(forecast.pool(missing, now: poolNow, calendar: poolCalendar).remainingPercent == nil)
+    config.accounts[1].removed = true
+    #expect(forecast.pool([readings[0]], now: poolNow, calendar: poolCalendar).remainingPercent == 50)
+}
+
 @Test func `Pooled pace sums each calendar date once and empties the pool as a whole`() {
     var forecast = QuotaForecast()
     for ago in [2, 1] {

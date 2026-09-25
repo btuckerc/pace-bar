@@ -6,7 +6,10 @@ import SwiftUI
 @MainActor
 enum Preview {
     static func render(to path: String) throws {
-        let store = UsageStore()
+        let store = UsageStore(loadConfiguration: false)
+        let host = InferenceHost(electricityUSDPerKWh: 0.15)
+        store.configuration.hosts = [host]
+        var reading = HostReading()
         let snapshot = try UsageParser.codex(Data("""
         {"plan_type":"pro","rate_limit_reset_credits":{"available_count":0},"rate_limit":{"primary_window":{
         "used_percent":23,"reset_at":\(Int(Date().timeIntervalSince1970 + 518_400)),"limit_window_seconds":604800}}}
@@ -37,24 +40,35 @@ enum Preview {
         store.router = try UsageParser.openRouter(
             key: Data("{\"data\":{\"usage_daily\":0.1,\"usage_weekly\":1.2,\"usage_monthly\":3.4}}".utf8),
             credits: Data("{\"data\":{\"total_credits\":40,\"total_usage\":7.32}}".utf8), warning: nil)
-        store.nous = try UsageParser.nous(Data("""
+        reading.nous = try UsageParser.nous(Data("""
         llamacpp:tokens_predicted_total 31978
         llamacpp:prompt_tokens_total 116790
         llamacpp:prompt_tokens_cached_total 479407
         llamacpp:predicted_tokens_seconds 42.5
         """.utf8), model: "Example-9B-Q5_K_M")
-        store.nousLifetime = NousLifetimeTotals(
+        reading.lifetime = NousLifetimeTotals(
             promptTokens: 116_790, cachedTokens: 479_407, outputTokens: 31978)
-        store.host = try UsageParser.host("""
+        reading.hardware = try UsageParser.host("""
         GPU 12, 6246, 10240, 27.2
                       total used free shared buff/cache available
         Mem:          31027 8499 12000 10 10528 22000
         cpu 100 0 50 850 0 0 0 0
         """)
-        store.cpuPercent = 8.4
-        store.configuration.electricityUSDPerKWh = 0.15
-        try store.gpuEnergy.record(UsageParser.host("GPU 12, 6246, 10240, 27.2\nENERGY 1000 1000"))
-        try store.gpuEnergy.record(UsageParser.host("GPU 12, 6246, 10240, 27.2\nENERGY 360001000 4600"))
+        reading.cpuPercent = 8.4
+        try reading.energy.record(UsageParser.host("GPU 12, 6246, 10240, 27.2\nENERGY 1000 1000"))
+        try reading.energy.record(UsageParser.host("GPU 12, 6246, 10240, 27.2\nENERGY 360001000 4600"))
+        store.hostReadings[host.id] = reading
+        if ProcessInfo.processInfo.arguments.contains("--preview-host-offline") {
+            let key = UsageStore.hostKey(host.id, hardware: false)
+            store.updated[key] = Date().addingTimeInterval(-600)
+            store.errors[key] = "Nothing is listening on port 8080 on nous; start your inference server."
+            store.hostReadings[host.id]?.inferenceFailed()
+        }
+        if ProcessInfo.processInfo.arguments.contains("--preview-host-paused") {
+            store.hostReadings[host.id]?.inferencePaused(
+                until: Date().addingTimeInterval(7200),
+                reason: "nous GPU is in use by round6.sh until 14:06 UTC; inference resumes automatically.")
+        }
         store.codex[2].snapshot = try UsageParser.codex(Data("""
         {"plan_type":"pro","rate_limit_reset_credits":{"available_count":0},"rate_limit":{"primary_window":{
         "used_percent":100,"reset_at":\(Int(Date().timeIntervalSince1970 + 28800)),"limit_window_seconds":604800}},

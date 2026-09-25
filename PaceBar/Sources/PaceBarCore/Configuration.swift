@@ -2,65 +2,153 @@ import Foundation
 
 /// How the status item draws quota. Both are template images tinted by the menu bar.
 public enum MenuBarIcon: String, Codable, CaseIterable, Sendable {
-    /// Codex 1–4 as level bars, then a separated Claude bar.
+    /// One bar per active account, grouped by provider.
     case bars
-    /// Codex 1–4 as four separated arcs, matching the app icon.
+    /// One glyph per provider, split into account arcs.
     case orbit
 }
 
 public struct Configuration: Codable, Sendable {
-    public var codexAuthFile = "~/.codex/auth.json"
+    public var schemaVersion = 2
+    public var accounts: [AccountEnrollment] = []
+    public var nextAccountNumber: [String: Int] = ["codex": 1, "claude": 1]
+    public var accountMigration: [String: AccountMigrationState] = ["codex": .complete, "claude": .complete]
+    /// Pre-registry settings named one Codex auth file. It only seeds account migration and is dropped once that is
+    /// complete; the cost estimate follows tracked accounts instead.
+    public var legacyCodexAuthFile: String?
     public var openRouterAuthFile = "~/.local/share/opencode/auth.json"
-    public var nousURL = "http://nous:8080"
-    public var nousSSHHost = "nous"
-    public var hostUtilization = true
-    public var electricityUSDPerKWh: Double?
-    public var nousMetricsURL: String?
+    public var hosts: [InferenceHost] = []
     public var menuBarIcon = MenuBarIcon.bars
 
     public init() {}
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        self.codexAuthFile = try container.decode(String.self, forKey: .codexAuthFile)
+        self.schemaVersion = try container.decodeIfPresent(Int.self, forKey: .schemaVersion) ?? 1
+        self.accounts = try container.decodeIfPresent([AccountEnrollment].self, forKey: .accounts) ?? []
+        self.nextAccountNumber = try container.decodeIfPresent([String: Int].self, forKey: .nextAccountNumber) ?? [
+            "codex": 1,
+            "claude": 1,
+        ]
+        self.accountMigration = try container.decodeIfPresent(
+            [String: AccountMigrationState].self,
+            forKey: .accountMigration)
+            ?? [
+                "codex": self.schemaVersion < 2 ? .pending : .complete,
+                "claude": self.schemaVersion < 2 ? .pending : .complete,
+            ]
+        let legacy = try decoder.container(keyedBy: LegacyKeys.self)
+        self.legacyCodexAuthFile = try container.decodeIfPresent(String.self, forKey: .legacyCodexAuthFile)
+            ?? legacy.decodeIfPresent(String.self, forKey: .codexAuthFile)
         self.openRouterAuthFile = try container.decode(String.self, forKey: .openRouterAuthFile)
-        self.nousURL = try container.decode(String.self, forKey: .nousURL)
-        self.nousSSHHost = try container.decode(String.self, forKey: .nousSSHHost)
-        self.hostUtilization = try container.decode(Bool.self, forKey: .hostUtilization)
-        self.electricityUSDPerKWh = try container.decodeIfPresent(Double.self, forKey: .electricityUSDPerKWh)
-        self.nousMetricsURL = try container.decodeIfPresent(String.self, forKey: .nousMetricsURL)
+        self.hosts = try container.decodeIfPresent([InferenceHost].self, forKey: .hosts) ?? [
+            InferenceHost(
+                name: "nous",
+                serverURL: legacy.decodeIfPresent(String.self, forKey: .nousURL) ?? "http://nous:8080",
+                sshHost: legacy.decodeIfPresent(String.self, forKey: .nousSSHHost) ?? "nous",
+                metricsURL: legacy.decodeIfPresent(String.self, forKey: .nousMetricsURL),
+                hostUtilization: legacy.decodeIfPresent(Bool.self, forKey: .hostUtilization) ?? true,
+                electricityUSDPerKWh: legacy.decodeIfPresent(Double.self, forKey: .electricityUSDPerKWh)),
+        ]
         // Settings files written before the icon choice existed keep loading with the default.
         self.menuBarIcon = try container.decodeIfPresent(MenuBarIcon.self, forKey: .menuBarIcon) ?? .bars
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case schemaVersion, accounts, nextAccountNumber, accountMigration, openRouterAuthFile, hosts, menuBarIcon
+        case legacyCodexAuthFile = "codexCostAuthFile"
+    }
+
+    private enum LegacyKeys: String, CodingKey {
+        case codexAuthFile, nousURL, nousSSHHost, nousMetricsURL, hostUtilization, electricityUSDPerKWh
+    }
+
+    /// Codex homes whose session logs feed the cost estimate, beyond `~/.codex`: every tracked Codex sign-in's folder.
+    public var codexCostHomes: [URL] {
+        let files = self.accounts.flatMap { entry -> [String] in
+            guard case let .codexFiles(paths, _) = entry.source else { return [] }
+            return paths
+        } + (self.legacyCodexAuthFile.map { [$0] } ?? [])
+        return files.map { Configuration.expand($0).deletingLastPathComponent() }
     }
 
     public static var file: URL {
         FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".config/pace-bar/config.json")
     }
 
-    public static func load() throws -> Configuration {
-        guard FileManager.default.fileExists(atPath: self.file.path) else { return Configuration() }
-        let value = try JSONDecoder().decode(Configuration.self, from: Data(contentsOf: self.file))
+    public static func load(file: URL = Configuration.file, legacyEvidence: Bool? = nil) throws -> Configuration {
+        let exists = FileManager.default.fileExists(atPath: file.path)
+        let oldData = exists ? try Data(contentsOf: file) : nil
+        var value = try oldData.map { try JSONDecoder().decode(Configuration.self, from: $0) } ?? Configuration()
+        let historyExists = legacyEvidence ?? FileManager.default.fileExists(
+            atPath: Configuration.expand("~/.local/share/pace-bar/quota-history.json").path)
+        if !exists, historyExists {
+            value.accountMigration = ["codex": .pending, "claude": .pending]
+        }
+        if value.accountMigration.values.contains(.pending) {
+            let paths = try? AccountDiscovery.codexPaths(value)
+            let codex = AccountDiscovery.codex(paths: paths ?? value.accounts.flatMap {
+                if case let .codexFiles(paths, _) = $0.source { return paths }
+                return []
+            })
+            let database = ClaudeAccount.ompDatabase
+            let claude = try? ClaudeAccount.candidates(database: database)
+            value.migrateAccounts(
+                codex: codex,
+                claude: claude ?? [],
+                codexReadable: paths != nil,
+                claudeReadable: claude != nil)
+            if let oldData, value.schemaVersion == 2 {
+                let backup = file.appendingPathExtension("pre-v2")
+                if !FileManager.default.fileExists(atPath: backup.path) {
+                    try oldData.write(to: backup, options: .withoutOverwriting)
+                    try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: backup.path)
+                }
+            }
+            try value.save(file: file)
+        }
+        if value.accountMigration["codex"] == .complete { value.legacyCodexAuthFile = nil }
         try value.validate()
+        if let oldData,
+           let object = try JSONSerialization.jsonObject(with: oldData) as? [String: Any],
+           object["hosts"] == nil || object["codexCostAuthFile"] != nil || object["codexAuthFile"] != nil
+        { try value.save(file: file) }
         return value
     }
 
     public func validate() throws {
-        if let rate = self.electricityUSDPerKWh, !rate.isFinite || rate < 0 {
-            throw UsageError.message("Electricity rate must be a nonnegative USD/kWh amount.")
+        guard self.schemaVersion == 2 || self.schemaVersion == 1
+        else { throw UsageError.message("Unsupported settings version.") }
+        guard Set(self.accounts.map(\.id)).count == self.accounts.count
+        else { throw UsageError.message("Duplicate enrollment IDs.") }
+        for provider in AccountProvider.allCases {
+            let entries = self.accounts.filter { $0.provider == provider }
+            let identities = entries.compactMap(\.providerAccountID)
+            guard Set(identities).count == identities.count, Set(entries.map(\.slot)).count == entries.count,
+                  entries
+                      .allSatisfy({ !$0.label.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && $0.slot >= 0
+                      }),
+                      (self.nextAccountNumber[provider.rawValue] ?? 0) > (entries.map(\.slot).max() ?? -1) + 1
+            else { throw UsageError.message("Invalid account registry.") }
+            for entry in entries {
+                switch entry.source {
+                case let .codexFiles(paths, home):
+                    guard provider == .codex, !paths.isEmpty, paths.allSatisfy({ !$0.isEmpty }),
+                          home == nil || paths
+                              .contains(Configuration.expand(home!).appendingPathComponent("auth.json").path)
+                    else { throw UsageError.message("Invalid Codex source.") }
+                case let .omp(database, _):
+                    guard provider == .claude,
+                          !database.isEmpty else { throw UsageError.message("Invalid Claude source.") }
+                }
+            }
         }
-        if let origin = self.nousMetricsURL, !origin.isEmpty {
-            guard let url = URL(string: origin), ["http", "https"].contains(url.scheme),
-                  url.host != nil, url.user == nil, url.password == nil, url.query == nil, url.fragment == nil,
-                  url.path.isEmpty || url.path == "/"
-            else { throw UsageError.message("Metrics URL must be an HTTP(S) server origin.") }
+        for host in self.hosts {
+            try host.validate()
         }
-        guard let url = URL(string: self.nousURL), ["http", "https"].contains(url.scheme),
-              url.host != nil, url.user == nil, url.password == nil, url.query == nil, url.fragment == nil,
-              url.path.isEmpty || url.path == "/"
-        else { throw UsageError.message("Nous URL must be an HTTP(S) server origin.") }
-        guard !self.nousSSHHost.isEmpty, !self.nousSSHHost.hasPrefix("-"),
-              self.nousSSHHost.range(of: "^[A-Za-z0-9_.@-]+$", options: .regularExpression) != nil
-        else { throw UsageError.message("Invalid SSH host.") }
+        guard Set(self.hosts.map(\.id)).count == self.hosts.count,
+              Set(self.hosts.map(\.normalizedOrigin)).count == self.hosts.count
+        else { throw UsageError.message("Duplicate host IDs or server origins.") }
     }
 
     public static func expand(_ path: String) -> URL {
@@ -75,13 +163,23 @@ public struct Configuration: Codable, Sendable {
         return data
     }
 
-    public func createIfMissing() throws {
-        let file = Self.file
-        guard !FileManager.default.fileExists(atPath: file.path) else { return }
-        try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+    public func save(file: URL = Configuration.file) throws {
+        try self.validate()
+        let directory = file.deletingLastPathComponent()
+        try FileManager.default.createDirectory(
+            at: directory,
+            withIntermediateDirectories: true,
+            attributes: [.posixPermissions: 0o700])
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: directory.path)
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         try encoder.encode(self).write(to: file, options: .atomic)
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: file.path)
+    }
+
+    public func createIfMissing() throws {
+        guard !FileManager.default.fileExists(atPath: Self.file.path) else { return }
+        try self.save()
     }
 }
 

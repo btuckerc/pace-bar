@@ -68,7 +68,9 @@ private struct OMPCostFixture {
     try fixture.write(first + "\n")
     let history = CodexCostHistory(home: fixture.home)
     let pricing = try fixture.pricing()
-    let initial = await history.records(authFile: fixture.auth, now: fixture.now)
+    let initial = await history.records(
+        codexHomes: [Configuration.expand(fixture.auth).deletingLastPathComponent()],
+        now: fixture.now)
     let initialCost = await pricing.estimate(records: initial.records, incomplete: initial.incomplete, now: fixture.now)
     #expect(initialCost.usd == 19)
     #expect(initialCost.weekUSD == 19)
@@ -79,13 +81,17 @@ private struct OMPCostFixture {
     try fixture.write(
         first + "\n" + fixture.message("child") + "\n",
         path: ".omp/agent/sessions/project/main/child.jsonl")
-    let updated = await history.records(authFile: fixture.auth, now: fixture.now)
+    let updated = await history.records(
+        codexHomes: [Configuration.expand(fixture.auth).deletingLastPathComponent()],
+        now: fixture.now)
     let updatedCost = await pricing.estimate(records: updated.records, incomplete: updated.incomplete, now: fixture.now)
     #expect(updated.records.count == 3)
     #expect(updatedCost.usd == 57)
     #expect(updatedCost.weekUSD == 57)
     #expect(!updatedCost.incomplete)
-    let restored = await CodexCostHistory(home: fixture.home).records(authFile: fixture.auth, now: fixture.now)
+    let restored = await CodexCostHistory(home: fixture.home).records(
+        codexHomes: [Configuration.expand(fixture.auth).deletingLastPathComponent()],
+        now: fixture.now)
     let restoredCost = await pricing.estimate(
         records: restored.records,
         incomplete: restored.incomplete,
@@ -99,23 +105,33 @@ private struct OMPCostFixture {
     defer { try? FileManager.default.removeItem(at: fixture.home) }
     try fixture.write(fixture.message("first"))
     let history = CodexCostHistory(home: fixture.home)
-    let first = await history.records(authFile: fixture.auth, now: fixture.now)
+    let first = await history.records(
+        codexHomes: [Configuration.expand(fixture.auth).deletingLastPathComponent()],
+        now: fixture.now)
     #expect(first.records.count == 1)
     try fixture.append("\n" + fixture.message("second") + "\n")
-    let second = await history.records(authFile: fixture.auth, now: fixture.now)
+    let second = await history.records(
+        codexHomes: [Configuration.expand(fixture.auth).deletingLastPathComponent()],
+        now: fixture.now)
     #expect(second.records.count == 2)
     let third = try fixture.message("third")
     let split = third.index(third.startIndex, offsetBy: third.count / 2)
     try fixture.append(String(third[..<split]))
-    let partial = await history.records(authFile: fixture.auth, now: fixture.now)
+    let partial = await history.records(
+        codexHomes: [Configuration.expand(fixture.auth).deletingLastPathComponent()],
+        now: fixture.now)
     #expect(partial.records.count == 2)
     #expect(!partial.incomplete)
     try fixture.append(String(third[split...]) + "\n")
-    let completed = await history.records(authFile: fixture.auth, now: fixture.now)
+    let completed = await history.records(
+        codexHomes: [Configuration.expand(fixture.auth).deletingLastPathComponent()],
+        now: fixture.now)
     #expect(completed.records.count == 3)
     #expect(!completed.incomplete)
     try fixture.write(fixture.message("replacement") + "\n")
-    let replaced = await history.records(authFile: fixture.auth, now: fixture.now)
+    let replaced = await history.records(
+        codexHomes: [Configuration.expand(fixture.auth).deletingLastPathComponent()],
+        now: fixture.now)
     #expect(replaced.records.count == 1)
     #expect(replaced.records.first?.id.contains("replacement") == true)
 }
@@ -137,7 +153,9 @@ private struct OMPCostFixture {
         fixture.message("excluded-router", provider: "openrouter"),
         fixture.message("excluded-local", provider: "llama.cpp"),
     ].joined(separator: "\n") + "\n", path: ".pi/agent/sessions/project/main.jsonl")
-    let result = await CodexCostHistory(home: fixture.home).records(authFile: fixture.auth, now: fixture.now)
+    let result = await CodexCostHistory(home: fixture.home).records(
+        codexHomes: [Configuration.expand(fixture.auth).deletingLastPathComponent()],
+        now: fixture.now)
     let openAI = result.records.filter { $0.vendor == .openAI }
     #expect(openAI.count == 2)
     #expect(openAI.reduce(0) { $0 + $1.tokens.input } == 70)
@@ -158,8 +176,12 @@ private struct OMPCostFixture {
     ]
     let line = try #require(String(data: JSONSerialization.data(withJSONObject: row), encoding: .utf8))
     try fixture.write(line + "\n")
-    _ = await CodexCostHistory(home: fixture.home).records(authFile: fixture.auth, now: fixture.now)
-    let restored = await CodexCostHistory(home: fixture.home).records(authFile: fixture.auth, now: fixture.now)
+    _ = await CodexCostHistory(home: fixture.home).records(
+        codexHomes: [Configuration.expand(fixture.auth).deletingLastPathComponent()],
+        now: fixture.now)
+    let restored = await CodexCostHistory(home: fixture.home).records(
+        codexHomes: [Configuration.expand(fixture.auth).deletingLastPathComponent()],
+        now: fixture.now)
     let record = try #require(restored.records.first)
     #expect(record.vendor == .anthropic)
     #expect(record.tokens.cacheWriteLong == 4)
@@ -176,7 +198,9 @@ private struct OMPCostFixture {
         fixture.message("anthropic", provider: "anthropic"),
     ].joined(separator: "\n") + "\n")
     let archiveURL = fixture.home.appendingPathComponent(".local/share/pace-bar/codex-cost-history.json")
-    _ = await CodexCostHistory(home: fixture.home).records(authFile: fixture.auth, now: fixture.now)
+    _ = await CodexCostHistory(home: fixture.home).records(
+        codexHomes: [Configuration.expand(fixture.auth).deletingLastPathComponent()],
+        now: fixture.now)
     // Recreate the pre-upgrade archive: same checkpoint, OpenAI rows only, no scan version.
     var archive = try CodexHistoryArchive.read(archiveURL)
     for (path, var file) in archive.files {
@@ -185,7 +209,9 @@ private struct OMPCostFixture {
         archive.files[path] = file
     }
     try archive.write(to: archiveURL)
-    let upgraded = await CodexCostHistory(home: fixture.home).records(authFile: fixture.auth, now: fixture.now)
+    let upgraded = await CodexCostHistory(home: fixture.home).records(
+        codexHomes: [Configuration.expand(fixture.auth).deletingLastPathComponent()],
+        now: fixture.now)
     #expect(upgraded.records.map(\.vendor.rawValue).sorted() == ["anthropic", "openai"])
 }
 
@@ -203,7 +229,9 @@ private struct OMPCostFixture {
     failed["id"] = "copied-with-different-id"
     let copy = try #require(String(data: JSONSerialization.data(withJSONObject: failed), encoding: .utf8))
     try fixture.write(missing + "\n" + first + "\n" + copy + "\n")
-    let result = await CodexCostHistory(home: fixture.home).records(authFile: fixture.auth, now: fixture.now)
+    let result = await CodexCostHistory(home: fixture.home).records(
+        codexHomes: [Configuration.expand(fixture.auth).deletingLastPathComponent()],
+        now: fixture.now)
     #expect(result.records.count == 1)
     #expect(result.records.first?.tokens.output == 3)
     #expect(result.incomplete)

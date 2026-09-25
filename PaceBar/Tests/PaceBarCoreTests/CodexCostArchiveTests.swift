@@ -21,14 +21,18 @@ import Testing
     let t3File = root.appendingPathComponent(".t3/userdata/usage-scan-cache.json")
     try CodexHistoryArchive(files: [missingLog: entry]).write(to: t3File)
     let auth = root.appendingPathComponent(".codex/auth.json").path
-    let first = await CodexCostHistory(home: root).records(authFile: auth, now: now)
+    let first = await CodexCostHistory(home: root).records(
+        codexHomes: [Configuration.expand(auth).deletingLastPathComponent()],
+        now: now)
     #expect(first.importedT3)
     #expect(first.retainedRecords == 2)
     #expect(first.records.count == 1)
     #expect(first.records.first?.tokens == event.tokens)
     #expect(!first.incomplete)
     try FileManager.default.removeItem(at: root.appendingPathComponent(".t3"))
-    let reloaded = await CodexCostHistory(home: root).records(authFile: auth, now: now)
+    let reloaded = await CodexCostHistory(home: root).records(
+        codexHomes: [Configuration.expand(auth).deletingLastPathComponent()],
+        now: now)
     #expect(reloaded.importedT3)
     #expect(reloaded.retainedRecords == 2)
     #expect(reloaded.records.first?.tokens == event.tokens)

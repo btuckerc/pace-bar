@@ -168,15 +168,16 @@ private func json(_ text: String) -> Data { Data(text.utf8) }
 
 @Test func `Configuration rejects credential URLs and shell arguments`() throws {
     var config = Configuration()
+    config.hosts = [InferenceHost()]
     try config.validate()
-    config.nousSSHHost = "nous; touch /tmp/no"
+    config.hosts[0].sshHost = "nous; touch /tmp/no"
     #expect(throws: (any Error).self) { try config.validate() }
-    config.nousSSHHost = "-oProxyCommand=bad"
+    config.hosts[0].sshHost = "-oProxyCommand=bad"
     #expect(throws: (any Error).self) { try config.validate() }
-    config.nousSSHHost = "tux@nous"
-    config.nousURL = "http://user:password@nous:8080"
+    config.hosts[0].sshHost = "tux@nous"
+    config.hosts[0].serverURL = "http://user:password@nous:8080"
     #expect(throws: (any Error).self) { try config.validate() }
-    config.nousURL = "http://nous:8080?model=foo"
+    config.hosts[0].serverURL = "http://nous:8080?model=foo"
     #expect(throws: (any Error).self) { try config.validate() }
 }
 
@@ -289,13 +290,13 @@ private func json(_ text: String) -> Data { Data(text.utf8) }
     "nousSSHHost":"host","hostUtilization":true}
     """)
     var config = try JSONDecoder().decode(Configuration.self, from: old)
-    #expect(config.nousMetricsURL == nil)
-    #expect(config.electricityUSDPerKWh == nil)
+    #expect(config.hosts[0].metricsURL == nil)
+    #expect(config.hosts[0].electricityUSDPerKWh == nil)
     #expect(config.menuBarIcon == .bars)
-    config.nousMetricsURL = "http://user:secret@host:8082"
+    config.hosts[0].metricsURL = "http://user:secret@host:8082"
     #expect(throws: (any Error).self) { try config.validate() }
-    config.nousMetricsURL = "http://host:8082"
-    config.electricityUSDPerKWh = -1
+    config.hosts[0].metricsURL = "http://host:8082"
+    config.hosts[0].electricityUSDPerKWh = -1
     #expect(throws: (any Error).self) { try config.validate() }
 }
 

@@ -20,6 +20,18 @@ Linger keeps this user's service manager running after logout and starts enabled
 
 Set the app's **Metrics URL** to `http://<tailnet-host>:8082`. Leave it blank to select the existing SSH collector. An HTTP failure is shown as unavailable; the app does not silently start additional SSH requests.
 
+The reusable `HostDoctor` core checks setup without mutation, using one strict,
+non-interactive SSH inspection plus HTTP requests from the Mac. Packaged apps
+include the pinned script and unit under `Contents/Resources/host/`. A caller
+selects repairs, displays the immutable plan's exact argv/scripts and rollback
+steps, and invokes `run` only after consent. Changed observations invalidate the
+plan. Matching hosts have no setup steps. Existing collector files are explicitly
+adopted/updated; backups and prior service state remain in a private remote
+transaction directory. Guarded rollback refuses intervening file changes.
+Cancellation closes SSH but may leave an unknown remote outcome: inspect again.
+Linger is deliberately retained, and inference services and energy checkpoints
+are never changed. The Settings consent UI is separate from this core API.
+
 NVIDIA `ENERGY` is a driver-lifetime cumulative hardware counter in millijoules. `ENERGY_ID` identifies the boot/device epoch. The app retains recorded energy and baselines in its existing host-scoped history, so observed driver/host resets do not erase prior totals. Avg W uses differences between successive valid readings within the same epoch.
 
 AMD `ENERGY_ESTIMATE` is an explicitly labeled sampled-power estimate, not a hardware energy counter. Adjacent valid readings, five to fifteen seconds apart, are integrated trapezoidally. Missing readings and longer gaps are not backfilled. The accumulated total and stable epoch identity are saved atomically at most once a minute to `estimated-energy-mj` in the service state directory, and checkpointed on graceful shutdown. Existing scalar checkpoints migrate automatically to compact JSON without losing their total. It survives app, service, and host restarts without counting downtime. Abrupt shutdown can lose the last uncheckpointed minute; missing/corrupt state starts a new counter identity, allowing the app to retain its earlier observed total. Replayed checkpoints do not count twice. Historical use before collection cannot be reconstructed. Retained energy remains available when the GPU suspends, although live watts may be unavailable.

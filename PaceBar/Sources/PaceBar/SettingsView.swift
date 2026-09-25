@@ -1,43 +1,56 @@
+import AppKit
 import PaceBarCore
 import ServiceManagement
 import SwiftUI
 
-struct SettingsView: View {
+/// The standard macOS settings window: toolbar tabs, the title follows the selected pane.
+@MainActor
+enum SettingsWindow {
+    static func make(store: UsageStore) -> NSWindow {
+        let tabs = NSTabViewController()
+        tabs.tabStyle = .toolbar
+        tabs.transitionOptions = []
+        for (title, symbol, view) in [
+            ("Accounts", "person.crop.circle", AnyView(AccountSettings(store: store))),
+            ("Hosts", "server.rack", AnyView(HostSettings(store: store))),
+            ("General", "gearshape", AnyView(GeneralSettings(store: store))),
+        ] {
+            let pane = NSHostingController(rootView: view.frame(width: 600, height: 520))
+            pane.sizingOptions = []
+            pane.preferredContentSize = NSSize(width: 600, height: 520)
+            pane.title = title
+            let item = NSTabViewItem(viewController: pane)
+            item.label = title
+            item.image = NSImage(systemSymbolName: symbol, accessibilityDescription: title)
+            tabs.addTabViewItem(item)
+        }
+        let window = NSWindow(contentViewController: tabs)
+        window.styleMask = [.titled, .closable]
+        window.toolbarStyle = .preference
+        window.isReleasedWhenClosed = false
+        return window
+    }
+}
+
+struct GeneralSettings: View {
     let store: UsageStore
-    @State private var draft = Configuration()
+    @State private var menuBarIcon = MenuBarIcon.bars
     @State private var error: String?
-    @State private var electricityRate = ""
-    @State private var metricsURL = ""
     @State private var launchAtLogin = SMAppService.mainApp.status == .enabled
 
     var body: some View {
         Form {
-            Section("Accounts") {
-                TextField("Codex auth file", text: self.$draft.codexAuthFile)
-                TextField("OpenRouter auth file", text: self.$draft.openRouterAuthFile)
-                Text(
-                    "Also discovers ~/.codex-t3/* and ~/.codex-gui/*. Deduplicates account IDs. Sign-ins stay read-only.")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
-            Section("nous") {
-                TextField("Server URL", text: self.$draft.nousURL)
-                TextField("Metrics URL (optional)", text: self.$metricsURL)
-                TextField("SSH fallback host", text: self.$draft.nousSSHHost)
-                Toggle("Read host utilization", isOn: self.$draft.hostUtilization)
-                TextField("Electricity $/kWh (optional)", text: self.$electricityRate)
-            }
-            Section("Menu bar") {
-                Picker("Menu bar icon", selection: self.$draft.menuBarIcon) {
+            Section {
+                Picker("Menu bar icon", selection: self.$menuBarIcon) {
                     Text("Bars").tag(MenuBarIcon.bars)
                     Text("Orbit").tag(MenuBarIcon.orbit)
                 }
-                .onChange(of: self.draft.menuBarIcon) { _, style in
+                .onChange(of: self.menuBarIcon) { _, style in
                     guard style != self.store.configuration.menuBarIcon else { return }
                     do { try self.store.setMenuBarIcon(style) } catch { self.error = error.localizedDescription }
                 }
-                Text(self.draft.menuBarIcon == .bars
-                    ? "Codex 1–4, then Claude. Taller bars mean more quota left."
-                    : "Codex 1–4 as arcs, clockwise from the top, matching the app icon.")
+            } footer: {
+                Text("Active accounts are grouped by provider. More than six accounts use a provider summary.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             Section {
@@ -51,34 +64,16 @@ struct SettingsView: View {
                             }
                         } catch { self.error = error.localizedDescription }
                     }
-                Text("Cloud: every 5 minutes. nous: every minute. Slower in Low Power Mode. Pause stops all polling.")
+            } footer: {
+                Text("Cloud: every 5 minutes. Hosts: every minute. Slower in Low Power Mode. Pause stops all polling.")
                     .font(.caption).foregroundStyle(.secondary)
-                if let error = self.error { Text(error).font(.caption).foregroundStyle(.red) }
-                HStack {
-                    Link("Source & updates", destination: URL(string: "https://github.com/btuckerc/pace-bar")!)
-                    Spacer()
-                    Button("Save") {
-                        do {
-                            let rate = self.electricityRate.trimmingCharacters(in: .whitespacesAndNewlines)
-                            if !rate.isEmpty, Double(rate) == nil {
-                                throw UsageError.message("Enter a numeric USD/kWh rate.")
-                            }
-                            self.draft.electricityUSDPerKWh = Double(rate)
-                            self.draft.nousMetricsURL = self.metricsURL.isEmpty ? nil : self.metricsURL
-                            try self.store.apply(self.draft)
-                            self.error = nil
-                        } catch { self.error = error.localizedDescription }
-                    }
-                    .keyboardShortcut(.defaultAction)
-                }
+            }
+            Section {
+                if let error = self.error { Text(error).foregroundStyle(.red) }
+                Link("Source & updates", destination: URL(string: "https://github.com/btuckerc/pace-bar")!)
             }
         }
         .formStyle(.grouped)
-        .frame(width: 520, height: 590)
-        .onAppear {
-            self.draft = self.store.configuration
-            self.metricsURL = self.draft.nousMetricsURL ?? ""
-            self.electricityRate = self.draft.electricityUSDPerKWh.map { String($0) } ?? ""
-        }
+        .onAppear { self.menuBarIcon = self.store.configuration.menuBarIcon }
     }
 }

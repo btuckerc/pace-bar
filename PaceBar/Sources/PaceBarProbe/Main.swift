@@ -30,13 +30,14 @@ struct Probe {
                             switch provider {
                             case "Codex":
                                 let accounts = try CodexAccount.discover(config)
-                                for (index, account) in accounts.enumerated() {
+                                for account in accounts {
                                     let value = try await services.codex(account: account)
-                                    print("Codex account \(index + 1): \(value.windows.count) quota windows")
+                                    print("\(account.label): \(value.windows.count) quota windows")
                                 }
                                 detail = "\(accounts.count) distinct accounts"
                             case "Claude":
-                                let accounts = try ClaudeAccount.discover()
+                                let accounts = try config.activeAccounts(.claude)
+                                    .map { try AccountDiscovery.resolveClaude($0) }
                                 for account in accounts {
                                     let windows = try await services.claude(account: account)
                                     print("\(account.label): \(windows.map(\.compactLabel).joined(separator: ", "))")
@@ -46,12 +47,23 @@ struct Probe {
                                 let value = try await services.openRouter(config)
                                 detail = "balance=\(value.balance != nil), account spend=\(value.totalSpent != nil)"
                             case "Nous":
-                                let value = try await services.nous(config)
-                                detail = "model loaded=\(value.model != nil), token counters=\(value.outputTokens != nil)"
+                                var parts: [String] = []
+                                for host in config.hosts where host.enabled {
+                                    let value = try await services.nous(host)
+                                    parts.append(
+                                        "\(host.name) model loaded=\(value.model != nil), "
+                                            + "token counters=\(value.outputTokens != nil)")
+                                }
+                                detail = parts.isEmpty ? "no hosts" : parts.joined(separator: "; ")
                             default:
-                                let value = try await services.host(config)
-                                detail = "GPU=\(value.gpuPercent != nil), RAM=\(value.ramUsedMiB != nil)"
-                                    + ", CPU=\(value.cpu != nil), energy=\(value.energyMilliJoules != nil)"
+                                var parts: [String] = []
+                                for host in config.hosts where host.enabled && host.hostUtilization {
+                                    let value = try await services.host(host)
+                                    parts.append(
+                                        "\(host.name) GPU=\(value.gpuPercent != nil), RAM=\(value.ramUsedMiB != nil)"
+                                            + ", CPU=\(value.cpu != nil), energy=\(value.energyMilliJoules != nil)")
+                                }
+                                detail = parts.isEmpty ? "no hosts" : parts.joined(separator: "; ")
                             }
                             print("\(provider): OK (\(detail))")
                             return false
@@ -79,10 +91,10 @@ struct Probe {
     private static func importCostHistory(path: String, configuration: Configuration) async throws {
         let now = Date()
         let history = CodexCostHistory()
-        var snapshot = await history.records(authFile: configuration.codexAuthFile, now: now)
+        var snapshot = await history.records(codexHomes: configuration.codexCostHomes, now: now)
         var passes = 1
         while snapshot.pendingScan, passes < 64 {
-            snapshot = await history.records(authFile: configuration.codexAuthFile, now: now)
+            snapshot = await history.records(codexHomes: configuration.codexCostHomes, now: now)
             passes += 1
         }
         let pricing = APICostPricing()

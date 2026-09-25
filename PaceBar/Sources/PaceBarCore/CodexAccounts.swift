@@ -4,13 +4,35 @@ public struct CodexAccount: Identifiable, Sendable {
     public let id: String
     public let label: String
     public let token: String
+    public var identityHint = "Unknown account"
 
     public static func parse(_ data: Data) throws -> CodexAccount {
         let auth = try Credentials.codex(data)
         guard let id = auth.account, !id.isEmpty else {
             throw UsageError.message("Codex account identity missing.")
         }
-        return CodexAccount(id: id, label: "account", token: auth.token)
+        return CodexAccount(id: id, label: "account", token: auth.token, identityHint: self.identityHint(data))
+    }
+
+    /// JWT claims are an unverified display hint, never an authentication decision.
+    private static func identityHint(_ data: Data) -> String {
+        guard let root = try? UsageParser.object(data),
+              let tokens = root["tokens"] as? [String: Any],
+              let token = tokens["id_token"] as? String
+        else { return "Unknown account" }
+        let parts = token.split(separator: ".", omittingEmptySubsequences: false)
+        guard parts.count == 3 else { return "Unknown account" }
+        var payload = String(parts[1]).replacingOccurrences(of: "-", with: "+")
+            .replacingOccurrences(of: "_", with: "/")
+        payload += String(repeating: "=", count: (4 - payload.count % 4) % 4)
+        guard let decoded = Data(base64Encoded: payload),
+              let claims = try? UsageParser.object(decoded)
+        else { return "Unknown account" }
+        let email = (claims["email"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let auth = claims["https://api.openai.com/auth"] as? [String: Any]
+        let plan = (auth?["chatgpt_plan_type"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let identity = email.flatMap { $0.isEmpty ? nil : $0 } ?? "Unknown account"
+        return plan.flatMap { $0.isEmpty ? nil : "\(identity) · \($0)" } ?? identity
     }
 
     /// Display names in display order, keyed by the auth-home aliases main, second, last and btc.
@@ -32,25 +54,24 @@ public struct CodexAccount: Identifiable, Sendable {
 
     /// Read existing homes only; never copy, refresh or rewrite credentials.
     public static func discover(_ configuration: Configuration) throws -> [CodexAccount] {
-        var paths = [configuration.codexAuthFile]
-        for root in ["~/.codex-t3", "~/.codex-gui"] {
-            let directory = Configuration.expand(root)
-            let children = (try? FileManager.default.contentsOfDirectory(
-                at: directory, includingPropertiesForKeys: nil)) ?? []
-            paths += children.sorted { $0.path < $1.path }.map { $0.appendingPathComponent("auth.json").path }
+        try configuration.activeAccounts(.codex).map { enrollment in
+            try AccountDiscovery.resolveCodex(enrollment)
         }
-        return try Self.discover(paths: paths)
     }
 
     public static func discover(paths: [String]) throws -> [CodexAccount] {
         var accounts: [String: (CodexAccount, Date)] = [:]
         var order: [String] = []
-        for path in paths where FileManager.default.fileExists(atPath: Configuration.expand(path).path) {
+        for path in paths where !AccountDiscovery.isAbsent(Configuration.expand(path)) {
             let label = Self.nickname(path: path, primary: path == paths.first)
             let account: CodexAccount
             do {
                 let parsed = try Self.parse(Configuration.boundedRead(path))
-                account = CodexAccount(id: parsed.id, label: label, token: parsed.token)
+                account = CodexAccount(
+                    id: parsed.id,
+                    label: label,
+                    token: parsed.token,
+                    identityHint: parsed.identityHint)
             } catch {
                 // Keep an unreadable source visible; never substitute another identity's usage.
                 account = CodexAccount(
@@ -65,7 +86,11 @@ public struct CodexAccount: Identifiable, Sendable {
                 let preferredLabel = Self.rank(previous.0.label) <= Self.rank(label) ? previous.0.label : label
                 let latest = modified > previous.1 ? account : previous.0
                 accounts[account.id] = (
-                    CodexAccount(id: account.id, label: preferredLabel, token: latest.token),
+                    CodexAccount(
+                        id: account.id,
+                        label: preferredLabel,
+                        token: latest.token,
+                        identityHint: latest.identityHint),
                     max(modified, previous.1))
             } else {
                 accounts[account.id] = (account, modified)

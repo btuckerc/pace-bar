@@ -1,24 +1,47 @@
 import Foundation
 
-/// The small, quantized quota projection used by the menu-bar icon.
-///
-/// A slot is tied to an account label, so removing or adding another account does not make
-/// existing bars move around. `nil` means that the account's reading is unavailable.
+public struct IconAccount: Equatable, Sendable, Identifiable {
+    public let id: String
+    public let label: String
+    public let level: Int?
+}
+
+/// Provider-separated projection. Order is enrollment order, never label matching.
 public struct QuotaIconState: Equatable, Sendable {
-    public static let labels = CodexAccount.labels
-    /// The Claude sign-in shown by the icon's separate Claude slot.
-    public static let claudeLabel = "Claude 1"
+    public let codex: [IconAccount]
+    public let claude: [IconAccount]
 
-    /// Codex 1–4 in twelve steps of remaining quota.
-    public let levels: [Int?]
-    /// Claude 1 in twelve steps of remaining quota.
-    public let claude: Int?
+    public struct Group: Equatable, Sendable {
+        public let provider: AccountProvider
+        public let accounts: [IconAccount]
+        public var summarized: Bool {
+            self.accounts.count > 6
+        }
 
-    public static let unavailable = QuotaIconState(levels: [nil, nil, nil, nil], claude: nil)
+        public var levels: [Int?] {
+            guard self.summarized else { return self.accounts.map(\.level) }
+            return [self.accounts.allSatisfy { $0.level != nil } ? self.accounts.compactMap(\.level).min() : nil]
+        }
+    }
 
-    /// - Parameters:
-    ///   - unavailable: Nothing is current (paused, asleep, or settings unreadable).
-    ///   - claudeFreshness: Claude readings are paced to respect Anthropic's rate limit, so an hour is normal.
+    public var groups: [Group] {
+        [Group(provider: .codex, accounts: self.codex), Group(provider: .claude, accounts: self.claude)]
+            .filter { !$0.accounts.isEmpty }
+    }
+
+    public var accessibilityDescription: String {
+        let lines = self.groups.flatMap { group in
+            group.accounts.map { account in
+                "\(group.provider.title), \(account.label): " +
+                    (account.level.map { "\($0 * 100 / 12)% remaining" } ?? "unavailable")
+            }
+        }
+        return lines.isEmpty ? "Pace Bar — no active accounts" : "Pace Bar — quota remaining\n" + lines
+            .joined(separator: "\n")
+    }
+
+    public static let unavailable = QuotaIconState(readings: [], now: .distantPast)
+
     public init(
         readings: [CodexReading],
         claude: [ClaudeReading] = [],
@@ -29,64 +52,33 @@ public struct QuotaIconState: Equatable, Sendable {
         codexUnavailable: Bool = false,
         claudeUnavailable: Bool = false)
     {
-        guard !unavailable else {
-            self = Self.unavailable
-            return
+        let codexIDs = Dictionary(grouping: readings, by: \.id)
+        self.codex = readings.map { reading in
+            let valid = !unavailable && !codexUnavailable && codexIDs[reading.id]?.count == 1
+                && reading.error == nil && Self.isFresh(reading.updated, now: now, freshness: freshness)
+            let windows = reading.snapshot?.windows.filter { $0.lane == nil } ?? []
+            return IconAccount(
+                id: reading.id,
+                label: reading.label,
+                level: valid && !windows.isEmpty ? Self.level(windows, now: now) : nil)
         }
-        self.levels = codexUnavailable ? [nil, nil, nil, nil]
-            : Self.codexLevels(readings, now: now, freshness: freshness)
-        self.claude = claudeUnavailable ? nil
-            : Self.claudeLevel(claude, now: now, freshness: claudeFreshness)
-    }
-
-    private init(levels: [Int?], claude: Int?) {
-        self.levels = levels
-        self.claude = claude
-    }
-
-    private static func codexLevels(_ readings: [CodexReading], now: Date, freshness: TimeInterval) -> [Int?] {
-        var projected = [Int?](repeating: nil, count: Self.labels.count)
-        guard freshness >= 0,
-              readings.count <= Self.labels.count,
-              Set(readings.map(\.id)).count == readings.count,
-              Set(readings.map(\.label)).count == readings.count,
-              readings.allSatisfy({ Self.labels.contains($0.label) })
-        else { return projected }
-
-        for reading in readings {
-            guard let slot = Self.labels.firstIndex(of: reading.label),
-                  reading.error == nil,
-                  let updated = reading.updated,
-                  Self.isFresh(updated, now: now, freshness: freshness),
-                  let snapshot = reading.snapshot
-            else { continue }
-
-            // Additional/model-specific lanes are intentionally excluded. The icon represents
-            // the account's ordinary subscription windows only.
-            let mainWindows = snapshot.windows.filter { $0.lane == nil }
-            guard !mainWindows.isEmpty else { continue }
-            projected[slot] = Self.level(mainWindows, now: now)
+        let claudeIDs = Dictionary(grouping: claude, by: \.id)
+        self.claude = claude.map { reading in
+            let valid = !unavailable && !claudeUnavailable && claudeIDs[reading.id]?.count == 1
+                && reading.error == nil && Self.isFresh(reading.updated, now: now, freshness: claudeFreshness)
+            return IconAccount(
+                id: reading.id,
+                label: reading.label,
+                level: valid ? reading.windows
+                    .flatMap { $0.isEmpty ? 12 : Self.level($0, now: now) } : nil)
         }
-        return projected
     }
 
-    private static func claudeLevel(_ readings: [ClaudeReading], now: Date, freshness: TimeInterval) -> Int? {
-        let matches = readings.filter { $0.label == Self.claudeLabel }
-        guard matches.count == 1, let reading = matches.first,
-              reading.error == nil,
-              let updated = reading.updated,
-              Self.isFresh(updated, now: now, freshness: freshness),
-              let windows = reading.windows
-        else { return nil }
-        // Windows whose reset has passed are already refilled or dropped by the tracker; none left means unused.
-        return windows.isEmpty ? 12 : Self.level(windows, now: now)
+    private static func isFresh(_ updated: Date?, now: Date, freshness: TimeInterval) -> Bool {
+        guard let updated else { return false }
+        return freshness >= 0 && now.timeIntervalSince(updated) >= 0 && now.timeIntervalSince(updated) <= freshness
     }
 
-    private static func isFresh(_ updated: Date, now: Date, freshness: TimeInterval) -> Bool {
-        freshness >= 0 && now.timeIntervalSince(updated) >= 0 && now.timeIntervalSince(updated) <= freshness
-    }
-
-    /// The binding (least remaining) window, rounded up so any remaining quota stays visible.
     private static func level(_ windows: [QuotaWindow], now: Date) -> Int? {
         guard windows.allSatisfy({
             $0.usedPercent.isFinite && (0...100).contains($0.usedPercent) && $0.resetsAt > now

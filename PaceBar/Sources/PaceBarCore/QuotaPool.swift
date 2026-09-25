@@ -1,6 +1,6 @@
 import Foundation
 
-/// Combined Codex capacity when every account is used in parallel, as OMP's credential balancer does.
+/// Combined tracked Codex capacity, assuming parallel use and earliest-reset-first routing.
 public struct QuotaPool: Sendable {
     /// Plan-weighted share of the pool still available; `nil` without fresh, weighted readings.
     public let remainingPercent: Double?
@@ -90,10 +90,10 @@ extension QuotaForecast {
         let expiring = Dictionary(uniqueKeysWithValues: zip(
             readings.map(\.id),
             zip(result.wasted, weights).map { $0 / $1 }))
-        let explanation = "Accounts are used in parallel: OMP routes work to the account whose quota would otherwise "
-            + "reset unused soonest, so this forecast spends the earliest-resetting quota first. "
+        let explanation = "Assumes tracked Codex accounts are used in parallel with earliest-reset-first routing. "
+            + "Pace Bar enrollment does not change OMP routing. "
             + "30-day history: \(totals.count) active dates, " + String(format: "%.1f", daily)
-            + " Pro-20x-equivalent percentage points/day across all accounts. Each date counts once. "
+            + " Pro-20x-equivalent percentage points/day across tracked Codex accounts. Each date counts once. "
             + "Today and idle dates are excluded. "
             + "Uses nominal plan weights: Pro 20x = 1, Pro 5x = 0.25, Plus = 0.05; assumes active days ahead. "
             + "Reported resets refill to 100%; unreported/banked resets are not predicted. "

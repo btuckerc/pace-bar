@@ -11,8 +11,10 @@ struct Dashboard: View {
             VStack(alignment: .leading, spacing: 16) {
                 self.codexSection
                 Divider().opacity(0.6)
-                self.nousSection
-                Divider().opacity(0.6)
+                ForEach(self.store.configuration.hosts.filter(\.enabled)) { host in
+                    self.nousSection(host)
+                    Divider().opacity(0.6)
+                }
                 self.routerSection
             }
             .padding(18)
@@ -130,7 +132,7 @@ struct Dashboard: View {
         var help: [String] = if let daily = pool.dailyConsumption {
             [
                 "Your pace: \(Int(daily.rounded())) points/day over \(pool.activeDays) active days.",
-                "Spends the soonest-resetting quota first, like OMP.",
+                "Assumes tracked accounts run in parallel, spending soonest-resetting quota first; enrollment does not change routing.",
             ]
         } else {
             [pool.explanation]
@@ -207,23 +209,40 @@ struct Dashboard: View {
         }
     }
 
-    private var nousSection: some View {
-        let nous = self.store.nous
-        let host = self.store.host
-        let hostStale = self.store.errors["Host"] != nil
+    private func nousSection(_ configuration: InferenceHost) -> some View {
+        let reading = self.store.hostReadings[configuration.id] ?? HostReading()
+        let nous = reading.nous
+        let host = reading.hardware
+        let inferenceKey = UsageStore.hostKey(configuration.id, hardware: false)
+        let hardwareKey = UsageStore.hostKey(configuration.id, hardware: true)
+        let hostStale = self.store.errors[hardwareKey] != nil
+        let inferenceFailed = self.store.errors[inferenceKey] != nil
         return VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 6) {
-                Text("nous").font(.system(size: 13, weight: .semibold))
-                self.status("Nous")
+                Text(configuration.name).font(.system(size: 13, weight: .semibold))
+                self.status(inferenceKey)
                 if let model = nous?.model {
-                    if self.store.errors["Nous"] == nil {
+                    if self.store.errors[inferenceKey] == nil {
                         Circle().fill(Palette.local).frame(width: 6, height: 6).help("Model loaded")
                     }
                     Text(model).font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1)
                         .truncationMode(.middle).help(model)
                 }
                 Spacer()
-                if nous?.model == nil {
+                if let pause = reading.pause {
+                    // `resume_at` is the lease's hard cap; the server may return sooner.
+                    Text(pause.until
+                        .map { "Paused · back by \($0.formatted(date: .omitted, time: .shortened))" } ?? "Paused")
+                        .font(.system(size: 11)).foregroundStyle(.secondary)
+                        .help(pause.reason ?? "The server is temporarily unavailable")
+                } else if inferenceFailed {
+                    // Live host metrics mean the machine is up and only the inference server is down.
+                    Text(host != nil && !hostStale ? "Server down" : "Unreachable")
+                        .font(.system(size: 11)).foregroundStyle(.secondary)
+                        .help(self.store.errors[inferenceKey] ?? "")
+                } else if nous == nil {
+                    Text("Waiting").font(.system(size: 11)).foregroundStyle(.secondary)
+                } else if nous?.model == nil {
                     Text("Idle").font(.system(size: 11)).foregroundStyle(.secondary)
                 } else {
                     Text("\(self.decimal(nous?.generationTPS)) t/s" + self.queueSummary(nous))
@@ -231,7 +250,7 @@ struct Dashboard: View {
                         .help("Generation speed reported by llama-server")
                 }
             }
-            if self.store.configuration.hostUtilization {
+            if configuration.hostUtilization {
                 HStack(alignment: .top, spacing: 0) {
                     MeterRing(
                         label: "GPU", value: host?.gpuPercent,
@@ -240,33 +259,33 @@ struct Dashboard: View {
                             : "GPU busy \(self.percent(host?.gpuPercent))"
                             + (host?.watts.map { " · drawing \(self.decimal($0)) W" } ?? ""))
                     MeterRing(
-                        label: "CPU", value: self.store.cpuPercent, detail: "", stale: hostStale,
-                        help: self.store.cpuPercent == nil ? "CPU reading unavailable"
-                            : "CPU busy \(self.percent(self.store.cpuPercent)), averaged since the last sample")
+                        label: "CPU", value: reading.cpuPercent, detail: "", stale: hostStale,
+                        help: reading.cpuPercent == nil ? "CPU reading unavailable"
+                            : "CPU busy \(self.percent(reading.cpuPercent)), averaged since the last sample")
                     self.memoryRing("VRAM", used: host?.vramUsedMiB, total: host?.vramTotalMiB, stale: hostStale)
                     self.memoryRing("RAM", used: host?.ramUsedMiB, total: host?.ramTotalMiB, stale: hostStale)
                 }
             }
-            TokenBar(totals: self.store.nousLifetime)
-            if self.store.configuration.hostUtilization {
+            TokenBar(totals: reading.lifetime)
+            if configuration.hostUtilization {
                 HStack(spacing: 4) {
-                    let estimated = self.store.gpuEnergy.isEstimated
+                    let estimated = reading.energy.isEstimated
                     Group {
                         Text("Energy").foregroundStyle(.secondary)
-                        Text("\(self.number(self.store.gpuEnergy.wattHours)) Wh" + (estimated ? " (est.)" : ""))
-                        if let average = self.store.gpuEnergy.averageWatts {
+                        Text("\(self.number(reading.energy.wattHours)) Wh" + (estimated ? " (est.)" : ""))
+                        if let average = reading.energy.averageWatts {
                             Text("avg \(Int(average.rounded())) W").foregroundStyle(.secondary)
                         }
                     }
                     .help("GPU energy recorded so far" + (estimated ? ", estimated from sampled power" : "")
                         + ". Average is between the last two samples.")
                     Spacer()
-                    if let rate = self.store.configuration.electricityUSDPerKWh {
+                    if let rate = configuration.electricityUSDPerKWh {
                         PrivateCostMetric(
-                            title: "Cost", amount: self.store.gpuEnergy.cost(rate: rate),
+                            title: "Cost", amount: reading.energy.cost(rate: rate),
                             explanation: "Recorded GPU energy × \(self.money(rate))/kWh", inline: true)
                     }
-                    self.status("Host")
+                    self.status(hardwareKey)
                 }
                 .font(.system(size: 11)).monospacedDigit()
             }
@@ -307,8 +326,7 @@ struct Dashboard: View {
     @ViewBuilder
     private func status(_ provider: String) -> some View {
         let error = self.store.errors[provider]
-            ?? (provider == "Nous" ? self.store.errors["Nous history"] : nil)
-            ?? (provider == "Host" ? self.store.errors["Host history"] : nil)
+            ?? self.store.errors[provider + ":history"]
             ?? (provider == "OpenRouter" ? self.store.router?.warning : nil)
         let date = self.store.updated[provider]
         let stale = date.map { Date().timeIntervalSince($0) > (self.store.constrained ? 1800 : 600) } ?? false

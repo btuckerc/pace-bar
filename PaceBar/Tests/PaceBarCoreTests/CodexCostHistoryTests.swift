@@ -59,7 +59,9 @@ private struct CostHistoryFixture {
     try FileManager.default.createSymbolicLink(
         at: shadow,
         withDestinationURL: fixture.root.appendingPathComponent(".codex"))
-    let result = await CodexCostHistory(home: fixture.root).records(authFile: fixture.auth, now: fixture.now)
+    let result = await CodexCostHistory(home: fixture.root).records(
+        codexHomes: [Configuration.expand(fixture.auth).deletingLastPathComponent()],
+        now: fixture.now)
     #expect(!result.incomplete)
     #expect(result.records.count == 3)
     #expect(result.records.reduce(0) { $0 + $1.tokens.input } == 31)
@@ -81,10 +83,14 @@ private struct CostHistoryFixture {
         fixture.usage(13, total: 46, offset: nextDay + 10),
     ])
     let scanner = CodexCostHistory(home: fixture.root)
-    let first = await scanner.records(authFile: fixture.auth, now: fixture.now)
+    let first = await scanner.records(
+        codexHomes: [Configuration.expand(fixture.auth).deletingLastPathComponent()],
+        now: fixture.now)
     #expect(first.records.map(\.tokens.input) == [11, 12])
     #expect(first.retainedRecords == 4)
-    let later = await scanner.records(authFile: fixture.auth, now: window.upperBound.addingTimeInterval(60))
+    let later = await scanner.records(
+        codexHomes: [Configuration.expand(fixture.auth).deletingLastPathComponent()],
+        now: window.upperBound.addingTimeInterval(60))
     #expect(later.records.map(\.tokens.input) == [12, 13])
     #expect(later.retainedRecords == 4)
 }
@@ -100,7 +106,9 @@ private struct CostHistoryFixture {
         fixture.line("turn_context", ["model": "example-new"], offset: -50),
         fixture.usage(10, total: 1010, offset: -49.1),
     ])
-    let result = await CodexCostHistory(home: fixture.root).records(authFile: fixture.auth, now: fixture.now)
+    let result = await CodexCostHistory(home: fixture.root).records(
+        codexHomes: [Configuration.expand(fixture.auth).deletingLastPathComponent()],
+        now: fixture.now)
     #expect(result.records.count == 1)
     #expect(result.records.first?.model == "example-new")
     #expect(result.records.first?.tokens.input == 10)
@@ -117,11 +125,15 @@ private struct CostHistoryFixture {
         fixture.usage(10, total: 10),
     ]
     try fixture.write(lines)
-    let before = await scanner.records(authFile: fixture.auth, now: fixture.now)
+    let before = await scanner.records(
+        codexHomes: [Configuration.expand(fixture.auth).deletingLastPathComponent()],
+        now: fixture.now)
     #expect(before.records.count == 1)
     try lines += [fixture.usage(20, total: 30, offset: -10), "{\"type\":\"token_count\",malformed"]
     try fixture.write(lines)
-    let after = await scanner.records(authFile: fixture.auth, now: fixture.now)
+    let after = await scanner.records(
+        codexHomes: [Configuration.expand(fixture.auth).deletingLastPathComponent()],
+        now: fixture.now)
     #expect(after.records.reduce(0) { $0 + $1.tokens.input } == 30)
     #expect(after.incomplete)
 }
@@ -153,7 +165,9 @@ private struct CostHistoryFixture {
     ]
     try fixture.write(primaryLines, path: ".codex/sessions/2027/01/15/primary.jsonl")
     let scanner = CodexCostHistory(home: fixture.root)
-    let before = await scanner.records(authFile: fixture.auth, now: fixture.now)
+    let before = await scanner.records(
+        codexHomes: [Configuration.expand(fixture.auth).deletingLastPathComponent()],
+        now: fixture.now)
     #expect(before.records.count == 1)
     let cacheFile = fixture.root.appendingPathComponent("rates.json")
     let cache: [String: Any] = [
@@ -173,7 +187,9 @@ private struct CostHistoryFixture {
         fixture.line("turn_context", ["model": "example-model"]),
         fixture.usage(19, offset: -5),
     ], path: "shadow/sessions/2027/01/15/shadow.jsonl")
-    let after = await scanner.records(authFile: fixture.auth, now: fixture.now)
+    let after = await scanner.records(
+        codexHomes: [Configuration.expand(fixture.auth).deletingLastPathComponent()],
+        now: fixture.now)
     let afterEstimate = await pricing.estimate(
         records: after.records, incomplete: after.incomplete, now: fixture.now)
     #expect(after.records.count == 3)
@@ -182,15 +198,21 @@ private struct CostHistoryFixture {
     #expect(try abs(#require(afterEstimate.usd) - 71.6) < 0.000001)
     #expect(!afterEstimate.incomplete)
     let restarted = CodexCostHistory(home: fixture.root)
-    let restored = await restarted.records(authFile: fixture.auth, now: fixture.now)
+    let restored = await restarted.records(
+        codexHomes: [Configuration.expand(fixture.auth).deletingLastPathComponent()],
+        now: fixture.now)
     let restoredEstimate = await pricing.estimate(
         records: restored.records, incomplete: restored.incomplete, now: fixture.now)
     #expect(restoredEstimate.usd == afterEstimate.usd)
     let nextWeek = fixture.now.addingTimeInterval(7 * 86400)
-    let weekly = await restarted.records(authFile: fixture.auth, now: nextWeek)
+    let weekly = await restarted.records(
+        codexHomes: [Configuration.expand(fixture.auth).deletingLastPathComponent()],
+        now: nextWeek)
     #expect(weekly.records.count == 3)
     let nextMonth = fixture.now.addingTimeInterval(31 * 86400)
-    let expired = await restarted.records(authFile: fixture.auth, now: nextMonth)
+    let expired = await restarted.records(
+        codexHomes: [Configuration.expand(fixture.auth).deletingLastPathComponent()],
+        now: nextMonth)
     #expect(expired.records.isEmpty)
     #expect(expired.retainedRecords == 3)
 }

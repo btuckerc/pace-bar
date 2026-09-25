@@ -28,7 +28,7 @@ public actor CodexCostHistory {
     }
 
     public func records(
-        authFile: String, now: Date = Date(), calendar: Calendar = .current)
+        codexHomes: [URL], now: Date = Date(), calendar: Calendar = .current)
         -> (records: [APICostRecord], incomplete: Bool, importedT3: Bool, retainedRecords: Int, pendingScan: Bool)
     {
         var incomplete = false
@@ -36,7 +36,7 @@ public actor CodexCostHistory {
         var changed = self.importT3(incomplete: &incomplete)
         // Commit the bootstrap before attempting any live scan; deleted source logs are still retained history.
         if changed { self.save(incomplete: &incomplete) }
-        let files = self.files(authFile: authFile, incomplete: &incomplete)
+        let files = self.files(codexHomes: codexHomes, incomplete: &incomplete)
         var budget = 512 * 1024 * 1024
         var pending = false
         for source in files {
@@ -147,12 +147,9 @@ public actor CodexCostHistory {
         }
     }
 
-    private func files(authFile: String, incomplete: inout Bool) -> [ScanFile] {
+    private func files(codexHomes: [URL], incomplete: inout Bool) -> [ScanFile] {
         let manager = FileManager.default
-        var nativeRoots = [
-            self.home.appendingPathComponent(".codex"),
-            Configuration.expand(authFile).deletingLastPathComponent(),
-        ]
+        var nativeRoots = [self.home.appendingPathComponent(".codex")] + codexHomes
         nativeRoots += self.t3Homes(incomplete: &incomplete)
         for name in [".codex-t3", ".codex-gui"] {
             let parent = self.home.appendingPathComponent(name)

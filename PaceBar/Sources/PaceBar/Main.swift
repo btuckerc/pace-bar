@@ -6,7 +6,7 @@ import SwiftUI
 enum Main {
     static func main() {
         let app = NSApplication.shared
-        if CommandLine.arguments.count == 3, CommandLine.arguments[1] == "--render-preview" {
+        if CommandLine.arguments.count >= 3, CommandLine.arguments[1] == "--render-preview" {
             do { try Preview.render(to: CommandLine.arguments[2]) } catch { fputs("Preview failed\n", stderr) }
             return
         }
@@ -80,30 +80,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         let state = self.store.quotaIconState
         let style = self.store.configuration.menuBarIcon
         guard let button = self.item?.button else { return }
-        func describe(_ label: String, level: Int?, remaining: Double?) -> String {
-            let value: String = if level != nil, let remaining {
-                remaining == 0 ? "exhausted"
-                    : remaining < 0.1 ? "<0.1% left"
-                    : "\(remaining.formatted(.number.precision(.fractionLength(0...1))))% left"
-            } else {
-                "unavailable"
-            }
-            return "\(label): \(value)"
-        }
-        var values = zip(QuotaIconState.labels, state.levels).map { label, level in
-            describe(
-                label,
-                level: level,
-                remaining: self.store.codex.first { $0.label == label }?.snapshot?.windows
-                    .filter { $0.lane == nil }.map(\.remainingPercent).min())
-        }
-        if style == .bars {
-            let claude = self.store.claude.first { $0.label == QuotaIconState.claudeLabel }
-            let remaining = claude?.windows.map { $0.map(\.remainingPercent).min() ?? 100 }
-            values.append(describe(QuotaIconState.claudeLabel, level: state.claude, remaining: remaining))
-        }
-        let description = "Pace Bar — quota remaining\n" + values.joined(separator: "\n")
-        // Keep spoken/hover values accurate even when a change is too small to move a pixel.
+        let description = state.accessibilityDescription
         let redraw = self.lastIcon?.state != state || self.lastIcon?.style != style
         if redraw {
             self.lastIcon = (state, style)
@@ -181,12 +158,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             NSApp.activate(ignoringOtherApps: true)
             return
         }
-        let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 520, height: 390),
-            styleMask: [.titled, .closable], backing: .buffered, defer: false)
-        window.title = "Pace Bar Settings"
-        window.isReleasedWhenClosed = false
-        window.contentView = NSHostingView(rootView: SettingsView(store: self.store))
+        let window = SettingsWindow.make(store: self.store)
         window.center()
         window.makeKeyAndOrderFront(nil)
         self.settingsWindow = window

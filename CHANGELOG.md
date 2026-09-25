@@ -1,5 +1,13 @@
 # Changelog
 
+## Pace Bar 0.5.0
+
+- Settings is now a native window with Accounts, Hosts and General panes.
+- Accounts: add Codex and Claude accounts found on this Mac, sign in to a new one, or choose an `auth.json`; rename, pause, remove, or remove and sign out. Removed accounts keep their number, and discovery never adds accounts on its own.
+- API cost estimates read every tracked Codex account's folder; the separate cost auth file setting is retired and migrated away. The OpenRouter key file moves to the Accounts pane.
+- Hosts: track several inference hosts. Check Setup inspects a host read-only over SSH and can install the metrics collector with a reviewed plan.
+- A host whose inference server stops shows **Server down** (or **Unreachable** when its metrics are also gone), with the diagnosis in the warning tooltip. A server that answers HTTP 503 with `Retry-After` or `resume_at` shows **Paused · back by** that time, is rechecked every five minutes, and is not reported as an outage.
+
 ## Pace Bar 0.4.0
 
 - Rename Usage Bar to Pace Bar: app `Pace Bar.app`, bundle ID `com.btuckerc.PaceBar`, repository `btuckerc/pace-bar`, release tags `pace-bar-vX.Y.Z`.

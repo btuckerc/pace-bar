@@ -26,7 +26,7 @@ public actor Services {
 
     private func get(_ url: URL, headers: [String: String] = [:], limit: Int = 1_048_576) async throws -> Data {
         var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 8)
-        request.setValue("PaceBar/0.4.0", forHTTPHeaderField: "User-Agent")
+        request.setValue("PaceBar/0.5.0", forHTTPHeaderField: "User-Agent")
         for (key, value) in headers {
             request.setValue(value, forHTTPHeaderField: key)
         }
@@ -37,6 +37,7 @@ public actor Services {
         if response.statusCode == 429 {
             throw UsageError.rateLimited(until: Self.retryAfter(response.value(forHTTPHeaderField: "Retry-After")))
         }
+        if response.statusCode == 503 { throw await Self.unavailable(bytes, response: response) }
         guard response.statusCode == 200 else { throw UsageError.http(response.statusCode) }
         guard response.expectedContentLength <= limit else { throw UsageError.oversized }
         var data = Data()
@@ -60,9 +61,28 @@ public actor Services {
         return formatter.date(from: value).map { min($0, now.addingTimeInterval(86400)) }
     }
 
-    public func codex(_ configuration: Configuration) async throws -> CodexSnapshot {
-        let auth = try CodexAccount.parse(Configuration.boundedRead(configuration.codexAuthFile))
-        return try await self.codex(account: auth)
+    /// Reads at most 4 KiB of a 503 body; a truncated or non-JSON body still yields `Retry-After`.
+    static func unavailable(_ bytes: URLSession.AsyncBytes, response: HTTPURLResponse) async -> UsageError {
+        var body = Data()
+        do {
+            for try await byte in bytes {
+                guard body.count < 4096 else { break }
+                body.append(byte)
+            }
+        } catch {}
+        return Self.unavailable(body, retryAfter: response.value(forHTTPHeaderField: "Retry-After"))
+    }
+
+    /// Reads an OpenAI-style 503 body: `{"error":{"message":…,"resume_at":<unix seconds>}}`.
+    static func unavailable(_ body: Data, retryAfter: String?, now: Date = Date()) -> UsageError {
+        let error = (try? JSONSerialization.jsonObject(with: body) as? [String: Any])?["error"] as? [String: Any]
+        let message = (error?["message"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+            .prefix(200)
+        let resume = UsageParser.number(error?["resume_at"]).map { Date(timeIntervalSince1970: $0) }
+            .flatMap { $0 > now && $0 <= now.addingTimeInterval(86400) ? $0 : nil }
+        return .unavailable(
+            until: resume ?? Self.retryAfter(retryAfter, now: now),
+            reason: message.flatMap { $0.isEmpty ? nil : String($0) })
     }
 
     public func codex(account auth: CodexAccount) async throws -> CodexSnapshot {
@@ -107,9 +127,9 @@ public actor Services {
         return try UsageParser.openRouter(key: nil, credits: credits, warning: nil)
     }
 
-    public func nous(_ configuration: Configuration) async throws -> NousSnapshot {
+    public func nous(_ configuration: InferenceHost) async throws -> NousSnapshot {
         try configuration.validate()
-        let origin = URL(string: configuration.nousURL)!
+        let origin = URL(string: configuration.serverURL)!
         let models = try await self.get(origin.appendingPathComponent("v1/models"))
         let unloadedModels = try UsageParser.unloadedModels(models)
         guard let model = try UsageParser.loadedModel(models) else {
@@ -124,15 +144,16 @@ public actor Services {
         return try UsageParser.nous(data, model: model).withUnloadedModels(unloadedModels)
     }
 
-    public func host(_ configuration: Configuration) async throws -> HostSnapshot {
+    public func host(_ configuration: InferenceHost) async throws -> HostSnapshot {
         try configuration.validate()
-        if let origin = configuration.nousMetricsURL, !origin.isEmpty {
+        if let origin = configuration.metricsURL, !origin.isEmpty {
             let data = try await self.get(URL(string: origin)!.appendingPathComponent("snapshot"), limit: 16384)
             guard let text = String(data: data, encoding: .utf8)
             else { throw UsageError.message("Invalid host snapshot.") }
             return try UsageParser.host(text)
         }
-        let text = try await HostProcess.sample(host: configuration.nousSSHHost)
+        guard let sshHost = configuration.sshHost else { throw UsageError.message("Set a metrics URL or SSH host.") }
+        let text = try await HostProcess.sample(host: sshHost)
         return try UsageParser.host(text)
     }
 }

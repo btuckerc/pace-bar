@@ -139,6 +139,8 @@ public enum UsageError: LocalizedError, Sendable {
     case oversized
     /// HTTP 429; `until` comes from `Retry-After` when the server sends one.
     case rateLimited(until: Date?)
+    /// HTTP 503 from a server that is intentionally paused; `reason` is the server's own message.
+    case unavailable(until: Date?, reason: String?)
 
     public var errorDescription: String? {
         switch self {
@@ -146,6 +148,7 @@ public enum UsageError: LocalizedError, Sendable {
         case let .http(status): "Request failed (HTTP \(status))."
         case .oversized: "Response exceeded the size limit."
         case .rateLimited: "Rate limited; retrying later."
+        case let .unavailable(_, reason): reason ?? "Temporarily unavailable; retrying later."
         }
     }
 }

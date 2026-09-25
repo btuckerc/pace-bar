@@ -114,3 +114,20 @@ private func fetch(_ log: FetchLog) -> ClaudeUsageTracker.Fetch {
         == Date(timeIntervalSince1970: 1_800_000_300))
     #expect(Services.retryAfter("soon", now: trackerNow) == nil)
 }
+
+@Test func `A paused server's 503 reports its reason and resume time`() {
+    let body = Data("""
+    {"error":{"code":503,"type":"unavailable_error","message":"nous GPU is in use by bench until 14:06 UTC.",
+    "resume_at":\(Int(trackerNow.timeIntervalSince1970) + 3600)}}
+    """.utf8)
+    guard case let .unavailable(until, reason) = Services.unavailable(body, retryAfter: "60", now: trackerNow)
+    else { Issue.record("Expected a pause"); return }
+    #expect(until == trackerNow.addingTimeInterval(3600))
+    #expect(reason == "nous GPU is in use by bench until 14:06 UTC.")
+
+    guard case let .unavailable(fallback, none) = Services.unavailable(
+        Data("Loading".utf8), retryAfter: "60", now: trackerNow)
+    else { Issue.record("Expected a pause"); return }
+    #expect(fallback == trackerNow.addingTimeInterval(60))
+    #expect(none == nil)
+}
