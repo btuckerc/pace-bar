@@ -23,7 +23,7 @@ struct AddAccountSheet: View {
                 ForEach(self.onThisMac, id: \.candidate.id) { item in
                     HStack {
                         VStack(alignment: .leading, spacing: 2) {
-                            Text(item.candidate.identityHint)
+                            PrivateText(text: item.candidate.identityHint, name: "email address")
                             if let previous = item.previous {
                                 Text("Previously \(previous)").font(.caption).foregroundStyle(.secondary)
                             }
@@ -72,7 +72,7 @@ struct AddAccountSheet: View {
             }
             ForEach(self.session.candidates) { candidate in
                 HStack {
-                    Text(candidate.identityHint)
+                    PrivateText(text: candidate.identityHint, name: "email address")
                     Spacer()
                     Button("Add") { self.enroll(candidate) }
                 }
@@ -180,7 +180,7 @@ struct SignOutSheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Remove and sign out \(self.entry.label)?").font(.headline)
-            Text(self.identityHint).foregroundStyle(.secondary)
+            PrivateText(text: self.identityHint, name: "email address").foregroundStyle(.secondary)
             Text("Pace Bar stops tracking it and signs out the private Codex folder it created for this account. "
                 + "Other Codex sign-ins are untouched; usage history stays.")
                 .font(.caption).fixedSize(horizontal: false, vertical: true)

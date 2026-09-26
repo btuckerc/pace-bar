@@ -6,8 +6,8 @@ cd "$SCRIPT_DIR/.."
 
 MODE=development
 IDENTITY=
-VERSION=0.5.0
-BUILD_NUMBER=11
+VERSION=0.5.1
+BUILD_NUMBER=12
 APP="$PWD/dist/Pace Bar.app"
 
 if [[ $# -gt 0 ]]; then
@@ -66,8 +66,8 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 <key>CFBundleExecutable</key><string>PaceBar</string>
 <key>CFBundleIconFile</key><string>PaceBar</string>
 <key>CFBundlePackageType</key><string>APPL</string>
-<key>CFBundleShortVersionString</key><string>0.5.0</string>
-<key>CFBundleVersion</key><string>11</string>
+<key>CFBundleShortVersionString</key><string>0.5.1</string>
+<key>CFBundleVersion</key><string>12</string>
 <key>LSMinimumSystemVersion</key><string>14.0</string>
 <key>LSUIElement</key><true/>
 <key>NSHighResolutionCapable</key><true/>

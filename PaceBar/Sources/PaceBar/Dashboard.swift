@@ -230,14 +230,10 @@ struct Dashboard: View {
                 }
                 Spacer()
                 if let pause = reading.pause {
-                    // `resume_at` is the lease's hard cap; the server may return sooner.
-                    Text(pause.until
-                        .map { "Paused · back by \($0.formatted(date: .omitted, time: .shortened))" } ?? "Paused")
-                        .font(.system(size: 11)).foregroundStyle(.secondary)
+                    Text(pause.label).font(.system(size: 11)).foregroundStyle(.secondary)
                         .help(pause.reason ?? "The server is temporarily unavailable")
                 } else if inferenceFailed {
-                    // Live host metrics mean the machine is up and only the inference server is down.
-                    Text(host != nil && !hostStale ? "Server down" : "Unreachable")
+                    Text(self.store.inferenceDownLabel(configuration.id))
                         .font(.system(size: 11)).foregroundStyle(.secondary)
                         .help(self.store.errors[inferenceKey] ?? "")
                 } else if nous == nil {

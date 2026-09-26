@@ -1,5 +1,10 @@
 # Changelog
 
+## Pace Bar 0.5.1
+
+- Settings hides account emails and host addresses and models behind a click-to-reveal blur, like costs. Host rows show the name and a connection dot and state unblurred; error and pause details are in the tooltip.
+- Drop the "Removing stops tracking only" footers from the Accounts pane.
+
 ## Pace Bar 0.5.0
 
 - Settings is now a native window with Accounts, Hosts and General panes.

@@ -27,11 +27,6 @@ struct AccountSettings: View {
                     Button("Add \(provider.title) account…") { self.adding = provider }
                 } header: {
                     Text(provider.title)
-                } footer: {
-                    Text(provider == .codex
-                        ? "Removing stops tracking only; the sign-in and history stay, and you can add it back."
-                        : "Removing stops tracking only; OMP keeps the sign-in, and you can add it back.")
-                        .font(.caption).foregroundStyle(.secondary)
                 }
             }
             OpenRouterKeySection(store: self.store)
@@ -107,11 +102,12 @@ private struct AccountRow: View {
     var body: some View {
         HStack {
             VStack(alignment: .leading, spacing: 2) {
-                Text(self.entry.label)
-                Text(self.entry.enabled ? self.identityHint : "Paused · \(self.identityHint)")
-                    .font(.caption).foregroundStyle(.secondary)
-                    .lineLimit(1).truncationMode(.middle)
-                    .help(self.sourceDescription)
+                Text(self.entry.label).help(self.sourceDescription)
+                HStack(spacing: 0) {
+                    if !self.entry.enabled { Text("Paused · ") }
+                    PrivateText(text: self.identityHint, name: "\(self.entry.label) email address")
+                }
+                .font(.caption).foregroundStyle(.secondary)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             Menu {

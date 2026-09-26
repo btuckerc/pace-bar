@@ -214,6 +214,12 @@ final class UsageStore {
         "\(id.uuidString):\(hardware ? "hardware" : "inference")"
     }
 
+    /// Failed inference with live host metrics means the machine is up and only its server is down.
+    func inferenceDownLabel(_ id: UUID) -> String {
+        self.hostReadings[id]?.hardware != nil && self.errors[Self.hostKey(id, hardware: true)] == nil
+            ? "Server down" : "Unreachable"
+    }
+
     private func scheduleHost(_ host: InferenceHost, hardware: Bool, interval: TimeInterval, force: Bool) {
         let key = Self.hostKey(host.id, hardware: hardware)
         guard self.tasks[key] == nil else { return }

@@ -26,7 +26,7 @@ public actor Services {
 
     private func get(_ url: URL, headers: [String: String] = [:], limit: Int = 1_048_576) async throws -> Data {
         var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 8)
-        request.setValue("PaceBar/0.5.0", forHTTPHeaderField: "User-Agent")
+        request.setValue("PaceBar/0.5.1", forHTTPHeaderField: "User-Agent")
         for (key, value) in headers {
             request.setValue(value, forHTTPHeaderField: key)
         }

@@ -15,10 +15,17 @@ struct HostSettings: View {
                 ForEach(self.store.configuration.hosts) { host in
                     HStack {
                         VStack(alignment: .leading, spacing: 2) {
-                            Text(host.name)
-                            Text("\(host.serverURL) · \(self.status(for: host))")
+                            let status = self.status(for: host)
+                            HStack(spacing: 6) {
+                                Text(host.name)
+                                Circle().fill(status.tint).frame(width: 7, height: 7)
+                                    .accessibilityHidden(true)
+                                Text(status.label).font(.caption).foregroundStyle(.secondary)
+                            }
+                            .help(status.detail ?? status.label)
+                            .accessibilityElement(children: .combine)
+                            PrivateText(text: self.address(of: host), name: "\(host.name) address and model")
                                 .font(.caption).foregroundStyle(.secondary)
-                                .fixedSize(horizontal: false, vertical: true)
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
                         Button("Check Setup…") { self.doctorHost = host }
@@ -63,16 +70,23 @@ struct HostSettings: View {
         self.doctorHost = self.store.configuration.hosts.first { $0.id == id }
     }
 
-    private func status(for host: InferenceHost) -> String {
-        guard host.enabled else { return "Disabled" }
-        if let error = self.store.errors[UsageStore.hostKey(host.id, hardware: false)] { return error }
+    /// Server URL, plus the loaded model once one is known.
+    private func address(of host: InferenceHost) -> String {
+        guard let model = self.store.hostReadings[host.id]?.nous?.model else { return host.serverURL }
+        return "\(host.serverURL) · \(model)"
+    }
+
+    /// Short, identity-free state for the row; `detail` (errors, pause reasons) goes in the tooltip.
+    private func status(for host: InferenceHost) -> (label: String, tint: Color, detail: String?) {
+        guard host.enabled else { return ("Disabled", .secondary, nil) }
         if let pause = self.store.hostReadings[host.id]?.pause {
-            return pause.reason ?? "Paused"
+            return (pause.label, .secondary, pause.reason)
         }
-        if let reading = self.store.hostReadings[host.id]?.nous {
-            return "Connected · \(reading.model ?? "inference available")"
+        if let error = self.store.errors[UsageStore.hostKey(host.id, hardware: false)] {
+            return (self.store.inferenceDownLabel(host.id), .orange, error)
         }
-        return "Waiting for data"
+        if self.store.hostReadings[host.id]?.nous != nil { return ("Connected", Palette.local, nil) }
+        return ("Waiting for data", .secondary, nil)
     }
 
     private func change(_ mutate: (inout Configuration) -> Void) {

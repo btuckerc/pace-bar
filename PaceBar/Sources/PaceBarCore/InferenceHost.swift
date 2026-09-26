@@ -74,6 +74,11 @@ public struct HostReading: Sendable {
     public struct Pause: Equatable, Sendable {
         public var until: Date?
         public var reason: String?
+
+        /// `until` is the lease's hard cap; the server may return sooner.
+        public var label: String {
+            self.until.map { "Paused · back by \($0.formatted(date: .omitted, time: .shortened))" } ?? "Paused"
+        }
     }
 
     /// Keep accumulated history, but never expose an old sample as current inference.
