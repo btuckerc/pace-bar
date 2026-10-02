@@ -68,7 +68,7 @@ private func fetch(_ log: FetchLog) -> ClaudeUsageTracker.Fetch {
     #expect(log.calls == 1)
 }
 
-@Test func `A newer OMP reading replaces a request`() async {
+@Test func `A newer OMP reading replaces a request, including its model-scoped lanes`() async {
     let cache = temporary("claude.json")
     let database = temporary("agent.db")
     defer {
@@ -81,10 +81,13 @@ private func fetch(_ log: FetchLog) -> ClaudeUsageTracker.Fetch {
     let reset = Int(trackerNow.timeIntervalSince1970 * 1000) + 3_600_000
     let sql = """
     CREATE TABLE usage_history (provider TEXT, account_id TEXT, limit_id TEXT, used_fraction REAL,
-      resets_at INTEGER, recorded_at INTEGER);
-    INSERT INTO usage_history VALUES ('anthropic', 'acct', 'anthropic:5h', 0.25, \(reset), \(recorded));
-    INSERT INTO usage_history VALUES ('anthropic', 'acct', 'anthropic:7d', 0.5, \(reset), \(recorded));
-    INSERT INTO usage_history VALUES ('anthropic', 'other', 'anthropic:5h', 0.99, \(reset), \(recorded + 1));
+      resets_at INTEGER, recorded_at INTEGER, label TEXT);
+    INSERT INTO usage_history VALUES ('anthropic', 'acct', 'anthropic:5h', 0.25, \(reset), \(recorded), 'Claude 5 Hour');
+    INSERT INTO usage_history VALUES ('anthropic', 'acct', 'anthropic:7d', 0.5, \(reset), \(recorded), 'Claude 7 Day');
+    INSERT INTO usage_history VALUES ('anthropic', 'acct', 'anthropic:7d:fable', 1.0, \(reset), \(recorded),
+      'Claude 7 Day (Fable)');
+    INSERT INTO usage_history VALUES ('anthropic', 'acct', 'anthropic:extra', 0.1, \(reset), \(recorded), 'Extra');
+    INSERT INTO usage_history VALUES ('anthropic', 'other', 'anthropic:5h', 0.99, \(reset), \(recorded + 1), 'Other');
     """
     #expect(sqlite3_exec(handle, sql, nil, nil, nil) == SQLITE_OK)
     sqlite3_close(handle)
@@ -94,7 +97,25 @@ private func fetch(_ log: FetchLog) -> ClaudeUsageTracker.Fetch {
         now: trackerNow,
         fetch: fetch(log))
     #expect(log.calls == 0)
-    #expect(readings[0].windows?.map(\.usedPercent) == [25, 50])
+    #expect(readings[0].windows?.map(\.usedPercent) == [25, 50, 100])
+    #expect(readings[0].windows?.map(\.lane) == [nil, nil, "Fable"])
+}
+
+@Test func `A model-scoped lane survives a relaunch and refills with its week`() async {
+    let cache = temporary("claude.json")
+    defer { try? FileManager.default.removeItem(at: cache) }
+    let log = FetchLog()
+    let reset = trackerNow.addingTimeInterval(86400)
+    log.result = .success(windows(session: 10, week: 20)
+        + [UsageParser.ClaudeWindow.scoped("Fable", usedPercent: 100, resetsAt: reset)])
+    _ = await tracker(cache: cache).refresh([account], now: trackerNow, fetch: fetch(log))
+
+    let relaunched = tracker(cache: cache)
+    let fable = { (readings: [ClaudeReading]) in readings[0].windows?.filter { $0.lane == "Fable" } ?? [] }
+    #expect(await fable(relaunched.cached([account], now: trackerNow)).map(\.usedPercent) == [100])
+    let nextWeek = await fable(relaunched.cached([account], now: reset.addingTimeInterval(60)))
+    #expect(nextWeek.map(\.usedPercent) == [0])
+    #expect(nextWeek.map(\.resetsAt) == [reset.addingTimeInterval(604_800)])
 }
 
 @Test func `Readings past a reset show the refilled allowance`() {

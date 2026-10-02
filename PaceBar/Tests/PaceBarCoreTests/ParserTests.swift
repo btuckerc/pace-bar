@@ -244,6 +244,23 @@ private func json(_ text: String) -> Data { Data(text.utf8) }
     #expect(windows[0].resetsAt == Date(timeIntervalSince1970: 1_799_985_599))
 }
 
+@Test func `Claude model-scoped weekly allowances become named lanes that do not set the subscription level`() throws {
+    let windows = try UsageParser.claude(json("""
+    {"five_hour":{"utilization":2,"resets_at":"2027-01-15T03:00:00+00:00"},
+     "seven_day":{"utilization":82,"resets_at":"2027-01-16T03:00:00+00:00"},"seven_day_opus":null,
+     "limits":[{"kind":"weekly_all","percent":82,"resets_at":"2027-01-16T03:00:00+00:00","scope":null},
+       {"kind":"weekly_scoped","percent":100,"resets_at":"2027-01-16T03:00:00.091544+00:00",
+        "scope":{"model":{"id":null,"display_name":"Fable"},"surface":null}},
+       {"kind":"weekly_scoped","percent":5,"resets_at":"2027-01-16T03:00:00+00:00","scope":{"surface":"chat"}}]}
+    """))
+    #expect(windows.map(\.compactLabel) == ["5h", "7d", "Fable · 7d"])
+    #expect(windows[2].remainingPercent == 0)
+    let now = Date(timeIntervalSince1970: 1_799_900_000)
+    let reading = ClaudeReading(id: "a", label: "Claude 1", windows: windows, updated: now, error: nil)
+    // 18% of the shared weekly allowance remains; the spent Fable lane does not empty the menu bar level.
+    #expect(QuotaIconState(readings: [], claude: [reading], now: now).claude[0].level == 3)
+}
+
 @Test func `Claude sign-ins come from enabled OMP credentials only`() throws {
     let file = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).db")
     defer { try? FileManager.default.removeItem(at: file) }

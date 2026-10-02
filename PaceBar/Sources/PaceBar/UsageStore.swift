@@ -15,22 +15,32 @@ final class UsageStore {
     var errors: [String: String] = [:]
     var updated: [String: Date] = [:]
     var refreshing: Set<String> = []
+    /// Reading IDs with an explicit reconnect in flight.
+    var reconnecting: Set<String> = []
     var paused = false
     var settingsError: String?
 
     @ObservationIgnored var iconNeedsUpdate: (() -> Void)?
-    @ObservationIgnored private let services = Services()
+    @ObservationIgnored let services = Services()
     @ObservationIgnored private let quotaHistory = QuotaHistoryStore()
-    @ObservationIgnored private let nousHistory = NousHistoryStore()
+    @ObservationIgnored let nousHistory = NousHistoryStore()
     @ObservationIgnored private let claudeUsage = ClaudeUsageTracker()
     @ObservationIgnored private let costHistory = CodexCostHistory()
     @ObservationIgnored private let costPricing = APICostPricing()
     @ObservationIgnored private var timer: Timer?
-    @ObservationIgnored private var tasks: [String: Task<Void, Never>] = [:]
-    @ObservationIgnored private var revisions: [String: Int] = [:]
-    @ObservationIgnored private var hostRequests = HostRequests()
+    @ObservationIgnored private var liveTimer: Timer?
+    @ObservationIgnored private var live = false
+    @ObservationIgnored var tasks: [String: Task<Void, Never>] = [:]
+    @ObservationIgnored private var reconnects: [String: Task<Void, Never>] = [:]
+    @ObservationIgnored var revisions: [String: Int] = [:]
+    @ObservationIgnored var hostRequests = HostRequests()
     @ObservationIgnored private var sleeping = false
-    @ObservationIgnored private var diagnosedOutages: Set<String> = []
+    @ObservationIgnored var diagnosedOutages: Set<String> = []
+    @ObservationIgnored var lastPersisted: [String: Date] = [:]
+    @ObservationIgnored var attempted: [String: Date] = [:]
+
+    /// Host sampling cadence while the panel is open; the host API caches its own sample for two seconds.
+    static let liveInterval: TimeInterval = 2
 
     init(loadConfiguration: Bool = true) {
         if loadConfiguration { self.reloadConfiguration() }
@@ -64,6 +74,23 @@ final class UsageStore {
         self.timer = timer
     }
 
+    /// While the panel is open, hosts are sampled every `liveInterval` and cloud readings older than a minute are
+    /// renewed. The extra timer exists only while the panel is shown.
+    func setLive(_ on: Bool) {
+        guard on != self.live else { return }
+        self.live = on
+        self.liveTimer?.invalidate()
+        self.liveTimer = nil
+        guard on else { return }
+        let timer = Timer(timeInterval: Self.liveInterval, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.refresh() }
+        }
+        timer.tolerance = 0.5
+        RunLoop.main.add(timer, forMode: .common)
+        self.liveTimer = timer
+        self.refresh()
+    }
+
     func sleep() {
         self.sleeping = true
         self.cancelRefreshes()
@@ -81,6 +108,11 @@ final class UsageStore {
         }
         self.tasks.removeAll()
         self.refreshing.removeAll()
+        for task in self.reconnects.values {
+            task.cancel()
+        }
+        self.reconnects.removeAll()
+        self.reconnecting.removeAll()
         self.iconNeedsUpdate?()
     }
 
@@ -99,25 +131,85 @@ final class UsageStore {
         // Reuse the existing wake-up to expire stale readings, including while paused.
         defer { self.iconNeedsUpdate?() }
         guard !self.paused, !self.sleeping, self.settingsError == nil else { return }
-        let cloudInterval: TimeInterval = self.constrained ? 900 : 300
-        let nousInterval: TimeInterval = self.constrained ? 300 : 60
+        let constrained = self.constrained
+        let cloudInterval: TimeInterval = switch (self.live, constrained) {
+        case (true, false): 60
+        case (true, true), (false, false): 300
+        case (false, true): 900
+        }
+        let backgroundHostInterval: TimeInterval = constrained ? 300 : 60
+        let hostInterval: TimeInterval = self.live ? (constrained ? 10 : Self.liveInterval) : backgroundHostInterval
         self.schedule("Codex", interval: cloudInterval, force: force)
+        // The tracker paces Anthropic requests itself and prefers OMP's recorded readings.
         self.schedule("Claude", interval: cloudInterval, force: force)
-        self.schedule("API cost", interval: self.constrained ? 300 : 60, force: force)
+        self.schedule("API cost", interval: constrained ? 300 : 60, force: force)
         self.schedule("OpenRouter", interval: cloudInterval, force: force)
         for host in self.configuration.hosts where host.enabled {
-            self.scheduleHost(host, hardware: false, interval: nousInterval, force: force)
+            self.scheduleHost(
+                host, hardware: false, interval: hostInterval, retryInterval: backgroundHostInterval, force: force)
             if host.hostUtilization {
-                self.scheduleHost(host, hardware: true, interval: nousInterval, force: force)
+                self.scheduleHost(
+                    host, hardware: true, interval: hostInterval, retryInterval: backgroundHostInterval, force: force)
             }
         }
     }
 
-    @ObservationIgnored private var attempted: [String: Date] = [:]
+    /// Re-reads one account's sign-in and quota now, leaving the other accounts alone.
+    func reconnect(_ provider: AccountProvider, id: String) {
+        guard !self.paused, !self.sleeping, self.reconnects[id] == nil, self.tasks[provider.title] == nil,
+              let enrollment = self.configuration.activeAccounts(provider).first(where: { $0.readingID == id })
+        else { return }
+        self.reconnecting.insert(id)
+        let generation = self.revisions[provider.title, default: 0]
+        let services = self.services
+        self.reconnects[id] = Task { [weak self] in
+            guard let self else { return }
+            defer {
+                if generation == self.revisions[provider.title, default: 0] {
+                    self.reconnects.removeValue(forKey: id)
+                    self.reconnecting.remove(id)
+                    self.iconNeedsUpdate?()
+                }
+            }
+            switch provider {
+            case .codex:
+                let previous = self.codex.first { $0.id == id }
+                let reading = await CodexReading.read(enrollment, previous: previous, services: services)
+                guard generation == self.revisions[provider.title, default: 0], !Task.isCancelled else { return }
+                if let index = self.codex.firstIndex(where: { $0.id == id }) { self.codex[index] = reading }
+                guard reading.error == nil else { return }
+                let (forecast, saved) = await self.quotaHistory.record([reading])
+                guard generation == self.revisions[provider.title, default: 0], !Task.isCancelled else { return }
+                self.quotaForecast = forecast
+                self.errors["History"] = saved ? nil : "Quota history could not be saved; estimates may restart after quitting."
+            case .claude:
+                var reading: ClaudeReading
+                do {
+                    let account = try AccountDiscovery.resolveClaude(enrollment)
+                    reading = await self.claudeUsage.refresh([account], force: true) {
+                        try await services.claude(account: $0)
+                    }[0]
+                } catch {
+                    let old = self.claude.first { $0.id == id }
+                    reading = ClaudeReading(
+                        id: id, label: enrollment.label, windows: old?.windows, updated: old?.updated,
+                        error: error.localizedDescription)
+                }
+                guard generation == self.revisions[provider.title, default: 0], !Task.isCancelled else { return }
+                if let index = self.claude.firstIndex(where: { $0.id == id }) { self.claude[index] = reading }
+            }
+        }
+    }
+
+    /// Whether `interval` has passed since `last`. A timer can fire a hair before a whole interval has elapsed since
+    /// the previous attempt, so a wake-up within the last tenth counts as due; otherwise a 2 s cadence slips to 4 s.
+    static func due(_ last: Date?, interval: TimeInterval) -> Bool {
+        last.map { Date().timeIntervalSince($0) >= interval * 0.9 } ?? true
+    }
 
     private func schedule(_ provider: String, interval: TimeInterval, force: Bool) {
         guard self.tasks[provider] == nil else { return }
-        if !force, let last = self.attempted[provider], Date().timeIntervalSince(last) < interval { return }
+        if !force, !Self.due(self.attempted[provider], interval: interval) { return }
         self.attempted[provider] = Date()
         self.refreshing.insert(provider)
         let generation = self.revisions[provider, default: 0]
@@ -134,25 +226,9 @@ final class UsageStore {
             do {
                 switch provider {
                 case "Codex":
-                    var readings: [CodexReading] = []
-                    for enrollment in config.activeAccounts(.codex) {
-                        var reading = CodexReading(
-                            id: enrollment.readingID,
-                            label: enrollment.label,
-                            snapshot: nil,
-                            updated: nil,
-                            error: nil)
-                        do {
-                            let account = try AccountDiscovery.resolveCodex(enrollment)
-                            reading.snapshot = try await self.services.codex(account: account)
-                            reading.updated = Date()
-                            reading.error = nil
-                        } catch {
-                            reading.error = error is UsageError ? error.localizedDescription : "Connection unavailable"
-                        }
-                        guard generation == self.revisions[provider, default: 0], !Task.isCancelled else { return }
-                        readings.append(reading)
-                    }
+                    let readings = await CodexReading.read(
+                        config.activeAccounts(.codex), previous: self.codex, services: self.services)
+                    guard generation == self.revisions[provider, default: 0], !Task.isCancelled else { return }
                     let (forecast, saved) = await self.quotaHistory.record(readings)
                     guard generation == self.revisions[provider, default: 0], !Task.isCancelled else { return }
                     self.quotaForecast = forecast
@@ -210,93 +286,6 @@ final class UsageStore {
         }
     }
 
-    static func hostKey(_ id: UUID, hardware: Bool) -> String {
-        "\(id.uuidString):\(hardware ? "hardware" : "inference")"
-    }
-
-    /// Failed inference with live host metrics means the machine is up and only its server is down.
-    func inferenceDownLabel(_ id: UUID) -> String {
-        self.hostReadings[id]?.hardware != nil && self.errors[Self.hostKey(id, hardware: true)] == nil
-            ? "Server down" : "Unreachable"
-    }
-
-    private func scheduleHost(_ host: InferenceHost, hardware: Bool, interval: TimeInterval, force: Bool) {
-        let key = Self.hostKey(host.id, hardware: hardware)
-        guard self.tasks[key] == nil else { return }
-        // At most four host component requests in flight; the coalesced timer drains the rest.
-        guard self.tasks.keys.filter({ $0.contains(":") }).count < 4 else { return }
-        if !force, let last = self.attempted[key], Date().timeIntervalSince(last) < interval { return }
-        // A paused server said when to come back; check every few minutes in case it resumes early.
-        if !force, !hardware, let until = self.hostReadings[host.id]?.pause?.until, Date() < until,
-           let last = self.attempted[key], Date().timeIntervalSince(last) < 300 { return }
-        self.attempted[key] = Date()
-        self.refreshing.insert(key)
-        let revision = self.revisions[key, default: 0]
-        let hostRevision = self.hostRequests.revision(for: host.id)
-        self.tasks[key] = Task { [weak self] in
-            guard let self else { return }
-            @MainActor func current() -> Bool {
-                revision == self.revisions[key, default: 0] && !Task.isCancelled
-                    && self.hostRequests.accepts(host.id, revision: hostRevision)
-            }
-            defer {
-                if current() {
-                    self.tasks.removeValue(forKey: key)
-                    self.refreshing.remove(key)
-                    self.refresh()
-                }
-            }
-            do {
-                if hardware {
-                    let value = try await self.services.host(host)
-                    guard current() else { return }
-                    let (energy, saved) = await self.nousHistory.recordEnergy(value, origin: host.serverURL)
-                    guard current() else { return }
-                    var reading = self.hostReadings[host.id] ?? HostReading()
-                    reading.cpuPercent = value.cpu?.usage(since: reading.hardware?.cpu)
-                    reading.hardware = value
-                    reading.energy = energy
-                    self.hostReadings[host.id] = reading
-                    self.errors[key + ":history"] = saved ? nil : "Could not save GPU energy history."
-                } else {
-                    let (stored, loaded) = await self.nousHistory.snapshot(origin: host.serverURL)
-                    guard current() else { return }
-                    self.hostReadings[host.id, default: HostReading()].lifetime = stored
-                    self.errors[key + ":history"] = loaded ? nil : "Could not load token history."
-                    let value = try await self.services.nous(host)
-                    guard current() else { return }
-                    let (totals, saved) = await self.nousHistory.record(value, origin: host.serverURL)
-                    guard current() else { return }
-                    self.hostReadings[host.id, default: HostReading()].nous = value
-                    self.hostReadings[host.id, default: HostReading()].pause = nil
-                    self.hostReadings[host.id, default: HostReading()].lifetime = totals
-                    self.errors[key + ":history"] = saved ? nil : "Could not save token history."
-                }
-                self.updated[key] = Date()
-                self.errors[key] = nil
-                self.diagnosedOutages.remove(key)
-            } catch let UsageError.unavailable(until, reason) where !hardware {
-                // An intentional pause is not an outage: no warning and no SSH diagnosis.
-                guard current() else { return }
-                self.hostReadings[host.id, default: HostReading()].inferencePaused(until: until, reason: reason)
-                self.errors[key] = nil
-                self.diagnosedOutages.remove(key)
-            } catch {
-                guard current() else { return }
-                if !hardware { self.hostReadings[host.id, default: HostReading()].inferenceFailed() }
-                // Diagnose once per outage over SSH; later failed polls keep that explanation.
-                if !hardware, self.diagnosedOutages.contains(key) { return }
-                self.errors[key] = error is UsageError ? error.localizedDescription : "Connection unavailable."
-                if !hardware {
-                    self.diagnosedOutages.insert(key)
-                    let detail = await HostDoctor().diagnoseInferenceFailure(host)
-                    guard current() else { return }
-                    self.errors[key] = detail
-                }
-            }
-        }
-    }
-
     func apply(_ config: Configuration) throws {
         try Self.save(config)
         let previous = self.configuration
@@ -327,6 +316,14 @@ final class UsageStore {
             self.attempted.removeValue(forKey: provider)
             self.errors.removeValue(forKey: provider)
             self.diagnosedOutages.remove(provider)
+            self.lastPersisted.removeValue(forKey: provider)
+        }
+        if !changed.isDisjoint(with: AccountProvider.allCases.map(\.title)) {
+            for task in self.reconnects.values {
+                task.cancel()
+            }
+            self.reconnects.removeAll()
+            self.reconnecting.removeAll()
         }
         self.hostRequests.reconcile(config.hosts)
         self.configuration = config

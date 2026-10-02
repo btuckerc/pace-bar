@@ -77,7 +77,11 @@ struct Dashboard: View {
                             title: [account.label, account.snapshot?.plan?.capitalized].compactMap(\.self)
                                 .joined(separator: " · "),
                             windows: account.snapshot?.windows ?? [], notes: [unused, reason],
-                            updated: account.updated, stale: stale))
+                            updated: account.updated, stale: stale),
+                        reconnect: { self.store.reconnect(.codex, id: account.id) },
+                        // A provider-wide refresh is re-reading this account too.
+                        reconnecting: self.store.reconnecting.contains(account.id)
+                            || (stale && self.store.refreshing.contains("Codex")))
                 }
                 if self.store.codex.isEmpty {
                     AccountRing(
@@ -97,8 +101,8 @@ struct Dashboard: View {
                     let reason = account.error ?? self.store.errors["Claude"] ?? old
                     AccountRing(
                         label: account.label,
-                        outer: account.windows?.first { $0.periodSeconds == 604_800 },
-                        inner: account.windows?.first { $0.periodSeconds == 18000 },
+                        outer: account.windows?.first { $0.periodSeconds == 604_800 && $0.lane == nil },
+                        inner: account.windows?.first { $0.periodSeconds == 18000 && $0.lane == nil },
                         tint: Palette.claude, innerTint: Palette.claudeSoft,
                         staleReason: reason,
                         help: self.ringHelp(
@@ -107,7 +111,10 @@ struct Dashboard: View {
                                 account.windows?.isEmpty == true ? "No active window" : nil,
                                 account.error ?? self.store.errors["Claude"],
                             ],
-                            updated: account.updated, stale: true))
+                            updated: account.updated, stale: true),
+                        reconnect: { self.store.reconnect(.claude, id: account.id) },
+                        reconnecting: self.store.reconnecting.contains(account.id)
+                            || (reason != nil && self.store.refreshing.contains("Claude")))
                 }
                 if self.store.claude.isEmpty, let error = self.store.errors["Claude"] {
                     AccountRing(label: "Claude 1", outer: nil, tint: Palette.claude, staleReason: error, help: error)
@@ -158,7 +165,7 @@ struct Dashboard: View {
         .help(help.joined(separator: "\n"))
     }
 
-    private func windowHelp(_ window: QuotaWindow) -> String {
+    private func windowHelp(_ window: QuotaWindow) -> [String] {
         let name: String = if let lane = window.lane {
             lane == "gpt-reserve" ? "Reserve" : lane
         } else {
@@ -168,10 +175,13 @@ struct Dashboard: View {
             default: window.compactLabel
             }
         }
-        return "\(name) \(Int(window.remainingPercent.rounded(.down)))% left · resets \(self.forecastDate(window.resetsAt))"
+        return [
+            name, "\(Int(window.remainingPercent.rounded(.down)))% left",
+            "resets \(self.forecastDate(window.resetsAt))",
+        ]
     }
 
-    /// Name, then each window, then only what needs attention.
+    /// Name, then each window as aligned columns, then only what needs attention.
     private func ringHelp(
         title: String,
         windows: [QuotaWindow],
@@ -180,9 +190,12 @@ struct Dashboard: View {
         stale: Bool) -> String
     {
         let freshness = stale ? updated.map { "Updated \($0.formatted(.relative(presentation: .named)))" } : nil
-        return ([title] + windows.sorted { $0.periodSeconds < $1.periodSeconds }
-            .map(self.windowHelp) + notes + [freshness])
-            .compactMap(\.self).joined(separator: "\n")
+        // Shared windows first within a period, then model-scoped lanes by name.
+        let rows = windows.sorted {
+            ($0.periodSeconds, $0.lane ?? "") < ($1.periodSeconds, $1.lane ?? "")
+        }.map(self.windowHelp)
+        return ([title] + TooltipColumns.lines(rows) + (notes + [freshness]).compactMap(\.self))
+            .joined(separator: "\n")
     }
 
     private func forecastDate(_ date: Date) -> String {

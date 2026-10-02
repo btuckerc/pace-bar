@@ -201,7 +201,8 @@ public enum AccountDiscovery {
             provider: candidate.provider, providerAccountID: candidate.providerAccountID,
             label: candidate.label, slot: 0, source: candidate.source)
         if candidate.provider == .codex {
-            _ = try self.resolveCodex(enrollment)
+            // Validates the candidate's own files, not other copies of the sign-in.
+            _ = try self.resolveCodex(enrollment, ompDatabase: nil)
         } else {
             _ = try self.resolveClaude(enrollment)
         }
@@ -285,25 +286,35 @@ public enum AccountDiscovery {
         return candidates
     }
 
-    public static func resolveCodex(_ enrollment: AccountEnrollment) throws -> CodexAccount {
+    /// The longest-lived copy of the enrolled sign-in: its Codex homes and, unless `ompDatabase` is `nil`, OMP's own
+    /// Codex sign-ins, matched by account identity. A copy without a known expiry ranks by its file's modification
+    /// time.
+    public static func resolveCodex(
+        _ enrollment: AccountEnrollment,
+        ompDatabase: URL? = OMPCredentials.database) throws -> CodexAccount
+    {
         guard case let .codexFiles(paths, _) = enrollment.source, let expected = enrollment.providerAccountID else {
             throw UsageError.message("Sign-in identity unresolved.")
         }
-        var newest: (CodexAccount, Date)?
+        var copies: [(account: CodexAccount, rank: Date)] = []
         for path in paths {
             guard let parsed = try? CodexAccount.parse(Configuration.boundedRead(path)),
                   parsed.id == expected else { continue }
             let attributes = try? FileManager.default.attributesOfItem(atPath: Configuration.expand(path).path)
-            let modified = attributes?[.modificationDate] as? Date ?? .distantPast
-            if newest == nil || modified > newest!.1 { newest = (parsed, modified) }
+            copies.append((parsed, parsed.expires ?? attributes?[.modificationDate] as? Date ?? .distantPast))
         }
-        guard let account = newest?.0
+        // An unreadable OMP store leaves the enrolled homes to stand on their own.
+        for account in ompDatabase.flatMap({ try? CodexAccount.omp(database: $0) }) ?? [] where account.id == expected {
+            copies.append((account, account.expires ?? .distantPast))
+        }
+        guard let account = copies.max(by: { $0.rank < $1.rank })?.account
         else { throw UsageError.message("Sign-in missing or changed identity; review sign-in.") }
         return CodexAccount(
             id: account.id,
             label: enrollment.label,
             token: account.token,
-            identityHint: account.identityHint)
+            identityHint: account.identityHint,
+            expires: account.expires)
     }
 
     public static func resolveClaude(_ enrollment: AccountEnrollment) throws -> ClaudeAccount {

@@ -14,15 +14,33 @@ struct AccountRing: View {
     /// Why the reading is stale; `nil` for a fresh reading.
     let staleReason: String?
     let help: String
+    /// Re-reads this account alone; offered only while its reading is stale or failed.
+    var reconnect: (() -> Void)?
+    var reconnecting = false
 
     private var windows: [QuotaWindow] {
         [self.inner, self.outer].compactMap(\.self)
     }
 
     var body: some View {
+        let reconnectable = self.staleReason != nil && self.reconnect != nil
+        Group {
+            if reconnectable, let reconnect = self.reconnect {
+                Button(action: reconnect) { self.content(reconnectable: true) }
+                    .buttonStyle(.plain)
+                    .disabled(self.reconnecting)
+                    .accessibilityHint("Reconnects this account")
+            } else {
+                self.content(reconnectable: false)
+            }
+        }
+        .help(reconnectable ? self.help + "\nClick to reconnect" : self.help)
+    }
+
+    private func content(reconnectable: Bool) -> some View {
         let stale = self.staleReason != nil
         let usable = self.windows.map(\.remainingPercent).min()
-        VStack(spacing: 4) {
+        return VStack(spacing: 4) {
             ZStack {
                 Self.arc(self.outer?.remainingPercent, lineWidth: 5, tint: stale ? .secondary : self.tint)
                 if self.inner != nil {
@@ -32,27 +50,33 @@ struct AccountRing: View {
                         tint: stale ? .secondary : self.innerTint ?? self.tint.opacity(0.55))
                         .padding(7)
                 }
-                Text(usable.map { "\(Int($0.rounded(.down)))" } ?? "—")
-                    .font(.system(size: 11, weight: .semibold)).monospacedDigit()
+                if self.reconnecting {
+                    ProgressView().controlSize(.small)
+                } else {
+                    Text(usable.map { "\(Int($0.rounded(.down)))" } ?? "—")
+                        .font(.system(size: 11, weight: .semibold)).monospacedDigit()
+                }
             }
             .frame(width: 44, height: 44)
             .opacity(stale ? 0.55 : 1)
             .overlay(alignment: .topTrailing) {
-                if self.staleReason != nil {
-                    Image(systemName: "exclamationmark.circle.fill").foregroundStyle(.orange)
+                if stale {
+                    Image(systemName: reconnectable ? "arrow.clockwise.circle.fill" : "exclamationmark.circle.fill")
+                        .foregroundStyle(.orange)
                         .font(.system(size: 9))
                 }
             }
             Text(self.label).font(.system(size: 10, weight: .medium)).lineLimit(1)
-            Text(self.windows.isEmpty ? " " : "↻ " + self.windows.map { Self.reset($0.resetsAt) }
-                .joined(separator: " · "))
+            Text(self.reconnecting ? "Reconnecting…" : self.windows.isEmpty ? " " : "↻ " + self.windows
+                .map { Self.reset($0.resetsAt) }.joined(separator: " · "))
                 .font(.system(size: 10)).foregroundStyle(.secondary).monospacedDigit().lineLimit(1)
         }
         .frame(maxWidth: .infinity)
+        .contentShape(Rectangle())
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(self.label)
-        .accessibilityValue(usable.map { "\(Int($0.rounded(.down)))% remaining" } ?? "Unavailable")
-        .help(self.help)
+        .accessibilityValue(
+            self.reconnecting ? "Reconnecting" : usable.map { "\(Int($0.rounded(.down)))% remaining" } ?? "Unavailable")
     }
 
     static func arc(_ remaining: Double?, lineWidth: CGFloat, tint: Color) -> some View {

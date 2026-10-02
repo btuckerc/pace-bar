@@ -1,5 +1,4 @@
 import Foundation
-import SQLite3
 
 /// A Claude subscription signed in through OMP. The token is only used for the read-only usage request.
 public struct ClaudeAccount: Identifiable, Sendable {
@@ -9,12 +8,8 @@ public struct ClaudeAccount: Identifiable, Sendable {
     public let expires: Date?
     public var identityHint = "Unknown account"
 
-    public static var ompDatabase: URL {
-        Configuration.expand("~/.omp/agent/agent.db")
-    }
-
     /// Reads OMP's credential store read-only; never refreshes, copies, or rewrites credentials.
-    public static func discover(database: URL = ClaudeAccount.ompDatabase) throws -> [ClaudeAccount] {
+    public static func discover(database: URL = OMPCredentials.database) throws -> [ClaudeAccount] {
         var seen = Set<String>()
         return try self.records(database: database).compactMap { record in
             guard seen.insert(record.0.id).inserted else { return nil }
@@ -27,7 +22,7 @@ public struct ClaudeAccount: Identifiable, Sendable {
         }
     }
 
-    public static func candidates(database: URL = ClaudeAccount.ompDatabase) throws -> [AccountCandidate] {
+    public static func candidates(database: URL = OMPCredentials.database) throws -> [AccountCandidate] {
         var result: [AccountCandidate] = []
         for (account, row) in try self.records(database: database) {
             let source = AccountSource.omp(database: database.path, credentialRowIDs: [row])
@@ -47,54 +42,16 @@ public struct ClaudeAccount: Identifiable, Sendable {
     }
 
     private static func records(database: URL) throws -> [(ClaudeAccount, Int64)] {
-        if AccountDiscovery.isAbsent(database) { return [] }
-        var handle: OpaquePointer?
-        defer { sqlite3_close(handle) }
-        guard sqlite3_open_v2(database.path, &handle, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else {
-            throw UsageError.message("OMP sign-ins are unreadable.")
-        }
-        sqlite3_busy_timeout(handle, 1000)
-        var statement: OpaquePointer?
-        defer { sqlite3_finalize(statement) }
-        let hasIdentityKey = sqlite3_table_column_metadata(
-            handle, nil, "auth_credentials", "identity_key", nil, nil, nil, nil, nil) == SQLITE_OK
-        let query = """
-        SELECT id, data, \(hasIdentityKey ? "identity_key" : "NULL") FROM auth_credentials
-        WHERE provider = 'anthropic' AND credential_type = 'oauth' AND disabled_cause IS NULL
-        ORDER BY id
-        """
-        guard sqlite3_prepare_v2(handle, query, -1, &statement, nil) == SQLITE_OK else {
-            throw UsageError.message("OMP sign-ins are unreadable.")
-        }
         var accounts: [(ClaudeAccount, Int64)] = []
-        var status = sqlite3_step(statement)
-        while status == SQLITE_ROW {
-            defer { status = sqlite3_step(statement) }
-            let row = sqlite3_column_int64(statement, 0)
-            let bytes = sqlite3_column_bytes(statement, 1)
-            guard bytes > 0, bytes <= 1_048_576, let blob = sqlite3_column_blob(statement, 1) else {
-                accounts.append((
-                    ClaudeAccount(
-                        id: "omp-anthropic-\(row)",
-                        label: "Claude \(accounts.count + 1)",
-                        token: "",
-                        expires: nil),
-                    row))
-                continue
-            }
-            let data = Data(bytes: blob, count: Int(bytes))
-            let identityKey = sqlite3_column_text(statement, 2).map { String(cString: $0) }
+        for row in try OMPCredentials.rows(provider: "anthropic", database: database) {
             let label = "Claude \(accounts.count + 1)"
-            guard let parsed = try? Self.parse(
-                data, fallbackID: "omp-anthropic-\(row)", label: label, identityKey: identityKey)
-            else {
-                // Keep an unreadable sign-in visible; never substitute another identity's usage.
-                accounts.append((ClaudeAccount(id: "omp-anthropic-\(row)", label: label, token: "", expires: nil), row))
-                continue
+            let fallbackID = "omp-anthropic-\(row.id)"
+            // Keep an unreadable sign-in visible; never substitute another identity's usage.
+            let parsed = row.data.flatMap {
+                try? Self.parse($0, fallbackID: fallbackID, label: label, identityKey: row.identityKey)
             }
-            accounts.append((parsed, row))
+            accounts.append((parsed ?? ClaudeAccount(id: fallbackID, label: label, token: "", expires: nil), row.id))
         }
-        guard status == SQLITE_DONE else { throw UsageError.message("OMP sign-ins are unreadable.") }
         return accounts
     }
 

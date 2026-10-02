@@ -66,11 +66,12 @@ public struct QuotaIconState: Equatable, Sendable {
         self.claude = claude.map { reading in
             let valid = !unavailable && !claudeUnavailable && claudeIDs[reading.id]?.count == 1
                 && reading.error == nil && Self.isFresh(reading.updated, now: now, freshness: claudeFreshness)
+            // Model-scoped weekly lanes are not the subscription's own allowance, as with Codex.
+            let windows = reading.windows?.filter { $0.lane == nil }
             return IconAccount(
                 id: reading.id,
                 label: reading.label,
-                level: valid ? reading.windows
-                    .flatMap { $0.isEmpty ? 12 : Self.level($0, now: now) } : nil)
+                level: valid ? windows.flatMap { $0.isEmpty ? 12 : Self.level($0, now: now) } : nil)
         }
     }
 

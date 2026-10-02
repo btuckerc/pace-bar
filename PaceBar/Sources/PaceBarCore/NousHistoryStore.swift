@@ -43,7 +43,9 @@ public actor NousHistoryStore {
         return (self.history.hosts[Self.originKey(origin)]?.energy ?? GPUEnergy(), true)
     }
 
-    public func recordEnergy(_ snapshot: HostSnapshot, origin: String) -> (GPUEnergy, Bool) {
+    /// `persist: false` previews the totals a sample would produce without saving or committing it. Counters are
+    /// cumulative, so the next persisted sample still applies the whole change since the last committed one.
+    public func recordEnergy(_ snapshot: HostSnapshot, origin: String, persist: Bool = true) -> (GPUEnergy, Bool) {
         self.loadIfNeeded()
         guard self.available else { return (GPUEnergy(), false) }
         let hostKey = Self.originKey(origin)
@@ -53,6 +55,7 @@ public actor NousHistoryStore {
         var energy = prior
         energy.record(snapshot)
         guard energy.isValid else { return (prior, false) }
+        guard persist else { return (energy, true) }
         host.energy = energy
         if next.hosts[hostKey] == nil {
             guard next.hosts.count < Self.maxHosts else { return (prior, false) }
@@ -63,7 +66,8 @@ public actor NousHistoryStore {
         return (energy, true)
     }
 
-    public func record(_ snapshot: NousSnapshot, origin: String) -> (NousLifetimeTotals, Bool) {
+    /// See `recordEnergy(_:origin:persist:)` for `persist`.
+    public func record(_ snapshot: NousSnapshot, origin: String, persist: Bool = true) -> (NousLifetimeTotals, Bool) {
         self.loadIfNeeded()
         guard self.available else { return (NousLifetimeTotals(), false) }
         let hostKey = Self.originKey(origin)
@@ -83,7 +87,7 @@ public actor NousHistoryStore {
             if metadataChanged { next.hosts[hostKey] = host }
         }
         guard let model = snapshot.model else {
-            if metadataChanged {
+            if metadataChanged, persist {
                 guard self.save(next) else { return (self.totals(for: hostKey), false) }
                 self.history = next
             }
@@ -109,6 +113,7 @@ public actor NousHistoryStore {
         guard modelHistory.isValid else { return (self.totals(for: hostKey), false) }
         host.models[modelKey] = modelHistory
         next.hosts[hostKey] = host
+        guard persist else { return (Self.totals(for: hostKey, in: next), true) }
         let changed = next != self.history
         if changed {
             guard self.save(next) else {
@@ -151,7 +156,11 @@ public actor NousHistoryStore {
     }
 
     private func totals(for hostKey: String) -> NousLifetimeTotals {
-        guard let host = self.history.hosts[hostKey] else { return NousLifetimeTotals() }
+        Self.totals(for: hostKey, in: self.history)
+    }
+
+    private static func totals(for hostKey: String, in history: History) -> NousLifetimeTotals {
+        guard let host = history.hosts[hostKey] else { return NousLifetimeTotals() }
         var prompt: Double?
         var cached: Double?
         var output: Double?

@@ -91,7 +91,7 @@ public struct Configuration: Codable, Sendable {
                 if case let .codexFiles(paths, _) = $0.source { return paths }
                 return []
             })
-            let database = ClaudeAccount.ompDatabase
+            let database = OMPCredentials.database
             let claude = try? ClaudeAccount.candidates(database: database)
             value.migrateAccounts(
                 codex: codex,

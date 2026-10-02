@@ -201,4 +201,49 @@ struct AccountRegistryTests {
         #expect(session.candidates.isEmpty)
         #expect(session.error != nil)
     }
+
+    @Test func `A Codex account uses whichever sign-in copy stays valid longest, including OMP's`() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let now = Date().timeIntervalSince1970
+        func home(_ name: String, expires: Double) throws -> String {
+            let claims = try JSONSerialization.data(withJSONObject: ["exp": expires]).base64EncodedString()
+                .replacingOccurrences(of: "=", with: "")
+            let auth = try JSONSerialization.data(withJSONObject: [
+                "tokens": ["account_id": "acct", "access_token": "header.\(claims).\(name)"],
+            ])
+            let path = root.appendingPathComponent("\(name).json")
+            try auth.write(to: path)
+            return path.path
+        }
+        let expired = try home("expired", expires: now - 86400)
+        let database = root.appendingPathComponent("agent.db")
+        var handle: OpaquePointer?
+        #expect(sqlite3_open(database.path, &handle) == SQLITE_OK)
+        let renewed = Int((now + 86400) * 1000)
+        let sql = """
+        CREATE TABLE auth_credentials (
+            id INTEGER PRIMARY KEY, provider TEXT, credential_type TEXT, data TEXT,
+            disabled_cause TEXT, identity_key TEXT);
+        INSERT INTO auth_credentials VALUES
+            (1, 'openai-codex', 'oauth', '{"access":"renewed","accountId":"acct","expires":\(renewed)}', NULL, NULL),
+            (2, 'openai-codex', 'oauth', '{"access":"other","accountId":"other","expires":\(renewed * 2)}', NULL, NULL),
+            (3, 'openai-codex', 'oauth', '{"access":"revoked","accountId":"acct","expires":\(renewed * 2)}', 'revoked', NULL);
+        """
+        #expect(sqlite3_exec(handle, sql, nil, nil, nil) == SQLITE_OK)
+        sqlite3_close(handle)
+        var enrollment = AccountEnrollment(
+            provider: .codex, providerAccountID: "acct", label: "Codex 2", slot: 1,
+            source: .codexFiles(paths: [expired], managedHome: nil))
+
+        let resolved = try AccountDiscovery.resolveCodex(enrollment, ompDatabase: database)
+        #expect(resolved.token == "renewed")
+        #expect(resolved.label == "Codex 2")
+        #expect(try AccountDiscovery.resolveCodex(enrollment, ompDatabase: nil).token.hasSuffix(".expired"))
+
+        let fresher = try home("fresher", expires: now + 2 * 86400)
+        enrollment.source = .codexFiles(paths: [expired, fresher], managedHome: nil)
+        #expect(try AccountDiscovery.resolveCodex(enrollment, ompDatabase: database).token.hasSuffix(".fresher"))
+    }
 }

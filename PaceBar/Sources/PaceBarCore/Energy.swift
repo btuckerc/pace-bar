@@ -27,12 +27,17 @@ public struct GPUEnergy: Codable, Equatable, Sendable {
     }
 
     public mutating func record(_ snapshot: HostSnapshot) {
-        self.averageWatts = nil
         guard let counter = Self.valid(snapshot.energyMilliJoules) else {
+            self.averageWatts = nil
             self.previous = nil
             return
         }
         let uptime = Self.valid(snapshot.uptime)
+        // The host API hands every poll between its samples the same cached one; a repeat carries nothing new, so
+        // the last average stands rather than blinking out.
+        if let previous = self.previous, uptime == previous.uptime, counter == previous.counter,
+           self.source == snapshot.energySource, snapshot.energyCounterID.map({ $0 == self.epoch }) ?? true { return }
+        self.averageWatts = nil
         let first = self.baseline == nil
         let sourceChanged = self.source != nil && self.source != snapshot.energySource
         let epochChanged = !sourceChanged && self.epoch != nil && snapshot.energyCounterID != nil

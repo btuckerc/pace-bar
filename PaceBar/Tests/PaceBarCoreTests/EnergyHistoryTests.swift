@@ -120,6 +120,35 @@ struct EnergyHistoryTests {
         #expect(energy.averageWatts == nil)
     }
 
+    @Test func `A repeated cached host sample keeps the last CPU and power figures until a new sample arrives`() {
+        func sample(_ wh: Double, uptime: Double, busy: Double) -> HostSnapshot {
+            HostSnapshot(
+                gpuPercent: nil, vramUsedMiB: nil, vramTotalMiB: nil, energyMilliJoules: wh * 3_600_000,
+                uptime: uptime, watts: nil, ramUsedMiB: nil, ramTotalMiB: nil,
+                cpu: CPUCounters(total: uptime * 100, idle: uptime * (100 - busy)))
+        }
+        var reading = HostReading()
+        for value in [sample(2, uptime: 100, busy: 10), sample(3, uptime: 160, busy: 40)] {
+            reading.record(hardware: value)
+            reading.energy.record(value)
+        }
+        let repeated = sample(3, uptime: 160, busy: 40)
+        reading.record(hardware: repeated)
+        reading.energy.record(repeated)
+        #expect(reading.cpuPercent.map { ($0 * 10).rounded() / 10 } == 90)
+        #expect(reading.energy.averageWatts == 60)
+        #expect(reading.energy.wattHours == 3)
+        reading.record(hardware: sample(4, uptime: 220, busy: 40))
+        reading.energy.record(sample(4, uptime: 220, busy: 40))
+        #expect(reading.cpuPercent.map { ($0 * 10).rounded() / 10 } == 40)
+        #expect(reading.energy.averageWatts == 60)
+        let noCounters = HostSnapshot(
+            gpuPercent: nil, vramUsedMiB: nil, vramTotalMiB: nil, energyMilliJoules: nil, uptime: nil, watts: nil,
+            ramUsedMiB: nil, ramTotalMiB: nil, cpu: nil)
+        reading.record(hardware: noCounters)
+        #expect(reading.cpuPercent == nil)
+    }
+
     @Test func `Energy extends token-only history and stays isolated by normalized host`() async throws {
         let file = try self.file()
         defer { self.remove(file) }

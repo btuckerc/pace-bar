@@ -26,7 +26,7 @@ public actor Services {
 
     private func get(_ url: URL, headers: [String: String] = [:], limit: Int = 1_048_576) async throws -> Data {
         var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 8)
-        request.setValue("PaceBar/0.5.1", forHTTPHeaderField: "User-Agent")
+        request.setValue("PaceBar/0.6.0", forHTTPHeaderField: "User-Agent")
         for (key, value) in headers {
             request.setValue(value, forHTTPHeaderField: key)
         }
@@ -85,9 +85,11 @@ public actor Services {
             reason: message.flatMap { $0.isEmpty ? nil : String($0) })
     }
 
-    public func codex(account auth: CodexAccount) async throws -> CodexSnapshot {
+    public func codex(account auth: CodexAccount, now: Date = Date()) async throws -> CodexSnapshot {
         guard !auth.token.isEmpty
         else { throw UsageError.message("Account sign-in unreadable. Sign in through its Codex home.") }
+        let expired = UsageError.message("Codex login expired. Sign in through Codex or OMP, then reconnect.")
+        if let expires = auth.expires, expires <= now { throw expired }
         var headers = ["Authorization": "Bearer \(auth.token)", "Accept": "application/json"]
         headers["ChatGPT-Account-Id"] = auth.id
         do {
@@ -98,14 +100,14 @@ public actor Services {
             }
             return try UsageParser.codex(data)
         } catch UsageError.http(401) {
-            throw UsageError.message("Codex login expired. Sign in through Codex, then refresh.")
+            throw expired
         }
     }
 
     public func claude(account: ClaudeAccount, now: Date = Date()) async throws -> [QuotaWindow] {
         guard !account.token.isEmpty
         else { throw UsageError.message("Claude sign-in unreadable. Sign in to Claude in OMP.") }
-        let expired = UsageError.message("Claude login expired. Use Claude in OMP to renew it, then refresh.")
+        let expired = UsageError.message("Claude login expired. Use Claude in OMP to renew it, then reconnect.")
         if let expires = account.expires, expires <= now { throw expired }
         let headers = [
             "Authorization": "Bearer \(account.token)",

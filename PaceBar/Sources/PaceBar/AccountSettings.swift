@@ -56,7 +56,7 @@ struct AccountSettings: View {
     /// Sign-ins on this Mac, tracked or not. Read-only; nothing is enrolled here.
     static func discover(_ configuration: Configuration) throws -> [AccountCandidate] {
         var found = try AccountDiscovery.codex(paths: AccountDiscovery.codexPaths(configuration))
-        var databases = Set([ClaudeAccount.ompDatabase.path])
+        var databases = Set([OMPCredentials.database.path])
         for entry in configuration.accounts {
             if case let .omp(database, _) = entry.source {
                 databases.insert(Configuration.expand(database).path)

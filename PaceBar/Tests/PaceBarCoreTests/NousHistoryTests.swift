@@ -40,6 +40,20 @@ struct NousHistoryTests {
         #expect(continued.0.promptTokens == 145)
     }
 
+    @Test func `Live previews show current totals without saving and lose nothing at the next save`() async throws {
+        let file = try self.file()
+        let store = NousHistoryStore(file: file)
+        _ = await store.record(self.snapshot("A", prompt: 100), origin: "http://host")
+        let saved = try Data(contentsOf: file)
+        let preview = await store.record(self.snapshot("A", prompt: 130), origin: "http://host", persist: false)
+        #expect(preview.0.promptTokens == 130)
+        #expect(try Data(contentsOf: file) == saved)
+        #expect(await NousHistoryStore(file: file).snapshot(origin: "http://host").0.promptTokens == 100)
+        let persisted = await store.record(self.snapshot("A", prompt: 160), origin: "http://host")
+        #expect(persisted.0.promptTokens == 160)
+        #expect(await NousHistoryStore(file: file).snapshot(origin: "http://host").0.promptTokens == 160)
+    }
+
     @Test func `Model return uses its retained baseline and unloaded retirement reseeds`() async throws {
         let file = try self.file()
         let store = NousHistoryStore(file: file)

@@ -1,5 +1,14 @@
 # Changelog
 
+## Pace Bar 0.6.0
+
+- While the panel is open, hosts update every two seconds and cloud quotas older than a minute are renewed; closed, the background cadence is unchanged. Host history is saved at most every 30 seconds.
+- Codex accounts also read OMP's `openai-codex` sign-ins, read-only, and use whichever copy of a sign-in stays valid longest, so an app's expired copy no longer fails an account OMP keeps signed in. An expired token is reported without sending a request.
+- Click a stale or failed account ring to reconnect just that account.
+- Claude's hover shows model-scoped weekly allowances such as Fable; they do not change the ring or the menu-bar level.
+- Ring tooltips line up each window's name, remaining percentage and reset in columns.
+- CPU and average GPU power no longer blink to "—" when a poll receives the host's cached sample.
+
 ## Pace Bar 0.5.1
 
 - Settings hides account emails and host addresses and models behind a click-to-reveal blur, like costs. Host rows show the name and a connection dot and state unblurred; error and pause details are in the tooltip.

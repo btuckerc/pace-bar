@@ -120,7 +120,7 @@ public struct HostSnapshot: Sendable {
     }
 }
 
-public struct CPUCounters: Sendable {
+public struct CPUCounters: Sendable, Equatable {
     public let total: Double
     public let idle: Double
 
@@ -196,19 +196,37 @@ public enum UsageParser {
     }
 
     /// Anthropic's OAuth usage contract, as read by CodexBar's ClaudeOAuthUsageFetcher. `utilization` is a
-    /// percentage. A window without a reset has not started, so it has no allowance to show yet.
+    /// percentage. A window without a reset has not started, so it has no allowance to show yet. Model-scoped weekly
+    /// allowances (`weekly_scoped` limits, or older `seven_day_<model>` objects) become lanes named for the model.
     public static func claude(_ data: Data) throws -> [QuotaWindow] {
         let root = try self.object(data)
         guard root.keys.contains("five_hour") || root.keys.contains("seven_day") else {
             throw UsageError.message("No subscription quota windows returned.")
         }
-        return ClaudeWindow.allCases.compactMap { kind in
+        var windows = ClaudeWindow.allCases.compactMap { kind -> QuotaWindow? in
             guard let value = root[kind.rawValue] as? [String: Any],
                   let used = self.number(value["utilization"]),
                   let reset = (value["resets_at"] as? String).flatMap(self.isoDate)
             else { return nil }
             return kind.window(usedPercent: used, resetsAt: reset)
         }
+        let limits = (root["limits"] as? [[String: Any]] ?? []).filter { $0["kind"] as? String == "weekly_scoped" }
+        let scoped: [(model: Any?, used: Any?, reset: Any?)] = limits.map { limit in
+            let model = ((limit["scope"] as? [String: Any])?["model"] as? [String: Any])?["display_name"]
+            return (model, limit["percent"], limit["resets_at"])
+        } + [("seven_day_opus", "Opus"), ("seven_day_sonnet", "Sonnet")].map { key, model in
+            let value = root[key] as? [String: Any]
+            return (value.map { _ in model }, value?["utilization"], value?["resets_at"])
+        }
+        var seen = Set<String>()
+        for lane in scoped {
+            guard let model = (lane.model as? String)?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  !model.isEmpty, model.count <= 64, let used = self.number(lane.used),
+                  let reset = (lane.reset as? String).flatMap(self.isoDate),
+                  seen.insert(ClaudeWindow.slug(model)).inserted else { continue }
+            windows.append(ClaudeWindow.scoped(model, usedPercent: used, resetsAt: reset))
+        }
+        return windows
     }
 
     /// The two Claude subscription windows Pace Bar shows, keyed as Anthropic names them.
@@ -224,6 +242,19 @@ public enum UsageParser {
             QuotaWindow(
                 id: "Claude-\(self.rawValue)", label: self == .fiveHour ? "5-hour session" : "Weekly",
                 periodSeconds: self.period, lane: nil, usedPercent: usedPercent, resetsAt: resetsAt)
+        }
+
+        /// One model's own weekly allowance, alongside the shared weekly window.
+        static func scoped(_ model: String, usedPercent: Double, resetsAt: Date) -> QuotaWindow {
+            QuotaWindow(
+                id: "Claude-seven_day:\(self.slug(model))", label: "Weekly · \(model)",
+                periodSeconds: sevenDay.period, lane: model, usedPercent: usedPercent, resetsAt: resetsAt)
+        }
+
+        /// OMP's limit-id form of a model name, so its recorded lanes and Pace Bar's agree.
+        static func slug(_ model: String) -> String {
+            model.lowercased().replacingOccurrences(of: "[^a-z0-9]+", with: "-", options: .regularExpression)
+                .trimmingCharacters(in: CharacterSet(charactersIn: "-"))
         }
     }
 

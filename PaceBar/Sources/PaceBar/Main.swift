@@ -99,7 +99,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             return
         }
         guard let button = self.item?.button else { return }
-        self.store.refresh()
+        self.store.setLive(true)
         let view = Dashboard(store: self.store, openSettings: { [weak self] in self?.showSettings() })
         let hosting = NSHostingController(rootView: view)
         hosting.sizingOptions = [.preferredContentSize]
@@ -111,6 +111,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     }
 
     func popoverDidClose(_: Notification) {
+        self.store.setLive(false)
         for monitor in self.dismissalMonitors {
             NSEvent.removeMonitor(monitor)
         }

@@ -71,6 +71,15 @@ public struct HostReading: Sendable {
     public var pause: Pause?
     public init() {}
 
+    /// A poll between host samples gets the same cached sample, so unchanged counters keep the last CPU figure
+    /// instead of blanking it; a new sample is averaged against the one before.
+    public mutating func record(hardware value: HostSnapshot) {
+        if value.cpu == nil || value.cpu != self.hardware?.cpu {
+            self.cpuPercent = value.cpu?.usage(since: self.hardware?.cpu)
+        }
+        self.hardware = value
+    }
+
     public struct Pause: Equatable, Sendable {
         public var until: Date?
         public var reason: String?
