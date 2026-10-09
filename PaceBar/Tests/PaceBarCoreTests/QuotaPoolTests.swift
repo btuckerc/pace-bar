@@ -10,11 +10,18 @@ private var poolCalendar: Calendar {
     return calendar
 }
 
-private func poolWindow(remaining: Double = 100, reset: Double = 7, lane: String? = nil) -> QuotaWindow {
+private let poolMonth: Double = 2_592_000
+
+private func poolWindow(
+    remaining: Double = 100,
+    reset: Double = 7,
+    lane: String? = nil,
+    period: Double = 604_800) -> QuotaWindow
+{
     QuotaWindow(
         id: lane ?? "main",
         label: "Weekly",
-        periodSeconds: 604_800,
+        periodSeconds: period,
         lane: lane,
         usedPercent: 100 - remaining,
         resetsAt: poolNow.addingTimeInterval(reset * poolDay))
@@ -24,12 +31,15 @@ private func poolAccount(
     _ id: String,
     remaining: Double = 100,
     reset: Double = 7,
-    plan: String = "pro") -> CodexReading
+    plan: String = "pro",
+    period: Double = 604_800) -> CodexReading
 {
     CodexReading(
         id: id,
         label: id,
-        snapshot: CodexSnapshot(windows: [poolWindow(remaining: remaining, reset: reset)], plan: plan),
+        snapshot: CodexSnapshot(
+            windows: [poolWindow(remaining: remaining, reset: reset, period: period)],
+            plan: plan),
         updated: poolNow,
         error: nil)
 }
@@ -39,17 +49,18 @@ private func poolActivity(
     account: String,
     amount: Double,
     ago: Int,
-    lane: String? = nil)
+    lane: String? = nil,
+    period: Double = 604_800)
 {
     let start = poolCalendar.startOfDay(for: poolNow).addingTimeInterval(-Double(ago) * poolDay + 3600)
     for (offset, used) in [(0.0, 0.0), (3600.0, amount)] {
         let quota = QuotaWindow(
             id: lane ?? "main",
             label: "Weekly",
-            periodSeconds: 604_800,
+            periodSeconds: period,
             lane: lane,
             usedPercent: used,
-            resetsAt: start.addingTimeInterval(604_800))
+            resetsAt: start.addingTimeInterval(period))
         forecast.record(
             account: account,
             windows: [quota],
@@ -152,6 +163,34 @@ private func poolHistory(rate: Double) -> QuotaForecast {
     #expect(pool.dailyConsumption == 30) // 20 Pro-20x points + 40 × 0.25 Pro-5x points.
     #expect(pool.remainingPercent == 68) // (60 + 25) of 125 weighted points.
     #expect(pool.exhaustsAt == poolNow.addingTimeInterval(85.0 / 30 * poolDay))
+}
+
+@Test func `A Free account's 30-day allowance joins the pool at its nominal weight and is spent last`() {
+    var forecast = QuotaForecast()
+    for ago in [2, 1] {
+        poolActivity(&forecast, account: "a", amount: 20, ago: ago)
+        poolActivity(&forecast, account: "b", amount: 50, ago: ago, period: poolMonth)
+    }
+    let free = poolAccount("b", remaining: 50, reset: 20, plan: "free", period: poolMonth)
+    let pool = forecast.pool([poolAccount("a", remaining: 30, reset: 1), free], now: poolNow, calendar: poolCalendar)
+    #expect(abs((pool.dailyConsumption ?? 0) - 20.5) < 1e-9) // 20 Pro-20x points + 50 × 0.01 Free points.
+    #expect(abs((pool.remainingPercent ?? 0) - 30.5 / 101 * 100) < 1e-9)
+    // The Pro week spends 20.5 before its reset and strands 9.5; the refilled week still resets before the
+    // Free month, so Free's 0.5 Pro-20x points go last.
+    #expect(abs((pool.expiring["a"] ?? 0) - 9.5) < 1e-6)
+    #expect(pool.expiring["b"] == 0)
+    #expect(pool.exhaustsAt.map { abs($0.timeIntervalSince(poolNow) - (1 + 100.5 / 20.5) * poolDay) < 1 } == true)
+}
+
+@Test func `An allowance of a different length than its plan's keeps the balance but not the forecast`() {
+    let forecast = poolHistory(rate: 20)
+    let weeklyFree = poolAccount("b", plan: "free")
+    let monthlyPro = poolAccount("b", period: poolMonth)
+    for mismatched in [weeklyFree, monthlyPro] {
+        let pool = forecast.pool([poolAccount("a"), mismatched], now: poolNow, calendar: poolCalendar)
+        #expect(pool.exhaustsAt == nil && pool.coveredThrough == nil)
+        #expect(pool.remainingPercent == 100)
+    }
 }
 
 @Test func `Reserve consumption never inflates the main pooled pace`() {

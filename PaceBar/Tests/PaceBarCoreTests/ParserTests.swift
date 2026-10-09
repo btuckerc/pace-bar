@@ -28,6 +28,22 @@ private func json(_ text: String) -> Data { Data(text.utf8) }
     #expect(value.windows[0].usedPercent == 101)
 }
 
+@Test func `A Free account reads its single 30-day allowance and reset date`() throws {
+    // The live Free response shape: one primary window, null secondary and additional limits.
+    let value = try UsageParser.codex(json("""
+    {"plan_type":"free","rate_limit":{"allowed":true,"limit_reached":false,"primary_window":{
+      "used_percent":6,"limit_window_seconds":2592000,"reset_after_seconds":2555551,"reset_at":1794100500},
+      "secondary_window":null},"additional_rate_limits":null,
+     "rate_limit_reset_credits":{"available_count":2,"applicable_available_count":0}}
+    """))
+    #expect(value.plan == "free")
+    #expect(value.windows.count == 1)
+    #expect(value.windows[0].lane == nil)
+    #expect(value.windows[0].periodSeconds == 2_592_000)
+    #expect(value.windows[0].resetsAt == Date(timeIntervalSince1970: 1_794_100_500))
+    #expect(value.windows[0].remainingPercent == 94)
+}
+
 @Test func `Missing quota never becomes a fabricated zero`() {
     #expect(throws: (any Error).self) { try UsageParser.codex(json("{\"rate_limit\":null}")) }
     #expect(throws: (any Error).self) {

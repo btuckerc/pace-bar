@@ -172,6 +172,7 @@ struct Dashboard: View {
             switch window.periodSeconds {
             case 18000: "5-hour"
             case 604_800: "Weekly"
+            case 2_592_000: "30-day"
             default: window.compactLabel
             }
         }

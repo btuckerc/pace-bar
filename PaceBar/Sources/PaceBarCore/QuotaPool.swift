@@ -17,14 +17,26 @@ public struct QuotaPool: Sendable {
     public let explanation: String
 }
 
-/// Nominal tier weights, expressed relative to Pro 20x. Provider labels follow
-/// CodexBar's CodexPlanFormatting; tier ratios: https://learn.chatgpt.com/docs/pricing
+/// Nominal main-allowance sizes, expressed relative to a Pro 20x week. Provider labels follow
+/// CodexBar's CodexPlanFormatting; paid tier ratios: https://learn.chatgpt.com/docs/pricing
 public enum CodexPlanCapacity {
-    public static func weight(_ plan: String?) -> Double? {
+    public struct Allowance: Equatable, Sendable {
+        /// Capacity of one full allowance, in Pro 20x weeks.
+        public let weight: Double
+        /// Allowance length the weight describes; a reading of another length is not comparable.
+        public let periodSeconds: TimeInterval
+    }
+
+    private static let week: TimeInterval = 604_800
+
+    public static func allowance(_ plan: String?) -> Allowance? {
         switch plan?.lowercased() {
-        case "pro": 1
-        case "prolite", "pro_lite", "pro-lite", "pro lite": 0.25
-        case "plus": 0.05
+        case "pro": Allowance(weight: 1, periodSeconds: self.week)
+        case "prolite", "pro_lite", "pro-lite", "pro lite": Allowance(weight: 0.25, periodSeconds: self.week)
+        case "plus": Allowance(weight: 0.05, periodSeconds: self.week)
+        // OpenAI publishes no Free size and says it varies by account. Reported Free allowances buy roughly
+        // $10-30 of API-priced use per 30 days against $66-90 per Plus week; 0.01 is a fifth of a Plus week.
+        case "free": Allowance(weight: 0.01, periodSeconds: 30 * 86400)
         default: nil
         }
     }
@@ -50,20 +62,21 @@ extension QuotaForecast {
                       .map { now.timeIntervalSince($0) >= 0 && now.timeIntervalSince($0) <= freshness } == true
               }) else { return unavailable("Fresh readings are needed for every account in the pool.") }
         let main = readings.map { $0.snapshot?.windows.filter { $0.lane == nil } ?? [] }
-        let optionalWeights = readings.map { CodexPlanCapacity.weight($0.snapshot?.plan) }
-        guard optionalWeights.allSatisfy({ $0 != nil }), main.allSatisfy({ !$0.isEmpty }) else {
+        let optionalAllowances = readings.map { CodexPlanCapacity.allowance($0.snapshot?.plan) }
+        guard optionalAllowances.allSatisfy({ $0 != nil }), main.allSatisfy({ !$0.isEmpty }) else {
             return unavailable("A quota-capacity weight is unavailable for one of the reported plans.")
         }
-        let weights = optionalWeights.compactMap(\.self)
+        let allowances = optionalAllowances.compactMap(\.self)
+        let weights = allowances.map(\.weight)
         let capacity = weights.reduce(0, +) * 100
         remaining = zip(main, weights).map { windows, weight in
             (windows.map(\.remainingPercent).min() ?? 0) * weight
         }.reduce(0, +) / capacity * 100
-        guard main.allSatisfy({ $0.count == 1 }), let first = main.first?.first,
-              first.periodSeconds > 0,
-              main.allSatisfy({ $0[0].periodSeconds == first.periodSeconds && $0[0].resetsAt > now })
-        else {
-            return unavailable("A pooled forecast needs one comparable main allowance per account.")
+        // Allowances may differ in length (a Free month beside Pro weeks); each weight describes one length.
+        guard zip(main, allowances).allSatisfy({ windows, allowance in
+            windows.count == 1 && windows[0].periodSeconds == allowance.periodSeconds && windows[0].resetsAt > now
+        }) else {
+            return unavailable("A pooled forecast needs one main allowance per account, of its plan's usual length.")
         }
         var totals: [Date: Double] = [:]
         for (index, reading) in readings.enumerated() {
@@ -95,7 +108,8 @@ extension QuotaForecast {
             + "30-day history: \(totals.count) active dates, " + String(format: "%.1f", daily)
             + " Pro-20x-equivalent percentage points/day across tracked Codex accounts. Each date counts once. "
             + "Today and idle dates are excluded. "
-            + "Uses nominal plan weights: Pro 20x = 1, Pro 5x = 0.25, Plus = 0.05; assumes active days ahead. "
+            + "Uses nominal weights per full allowance: Pro 20x week = 1, Pro 5x week = 0.25, Plus week = 0.05, "
+            + "Free 30 days = 0.01 (OpenAI publishes no Free size); assumes active days ahead. "
             + "Reported resets refill to 100%; unreported/banked resets are not predicted. "
             + "Forecast stops before a second unreported refill, at \(horizon.formatted()). "
             + "Missing historical usage can make estimates optimistic. Model-specific fallback capacity is excluded."
